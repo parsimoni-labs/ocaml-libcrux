@@ -1,0 +1,18 @@
+(data_only_dirs rust)
+
+(rule
+ (deps (source_tree rust))
+ (targets rust.ml rust.mli liblibcrux_ocaml.a dlllibcrux_ocaml.so)
+ (action
+ (no-infer
+  (progn
+   (chdir rust (run cargo build --release --offline))
+   (copy rust/rust.ml rust.ml)
+   (copy rust/rust.mli rust.mli)
+   (copy rust/target/release/liblibcrux_ocaml.a liblibcrux_ocaml.a)
+   (copy rust/target/release/liblibcrux_ocaml.so dlllibcrux_ocaml.so)))))
+
+(library
+  (name crux)
+  (public_name crux)
+  (foreign_archives libcrux_ocaml))

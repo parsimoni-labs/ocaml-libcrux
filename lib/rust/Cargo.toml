@@ -1,0 +1,16 @@
+[package]
+name = "libcrux-ocaml"
+version = "0.1.0"
+authors = ["Cryspen", "info@cryspen.com"]
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+libcrux-ml-dsa = { git = "https://github.com/cryspen/libcrux/" }
+rand = "0.9"
+ocaml = "*"
+
+[build-dependencies]
+ocaml-build = "*"
