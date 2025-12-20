@@ -6,7 +6,7 @@
  (action
  (no-infer
   (progn
-   (chdir rust (run cargo build --release --frozen))
+   (chdir rust (run cargo build --release))
    (copy rust/rust.ml rust.ml)
    (copy rust/rust.mli rust.mli)
    (copy rust/target/release/liblibcrux_ocaml.a liblibcrux_ocaml.a)
