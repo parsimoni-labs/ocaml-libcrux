@@ -27,6 +27,7 @@
 //!
 //! Type aliases are provided for common byte orders in the [`big_endian`],
 //! [`little_endian`], [`network_endian`], and [`native_endian`] submodules.
+//! Note that network-endian is a synonym for big-endian.
 //!
 //! # Example
 //!
@@ -494,6 +495,7 @@ example of how it can be used for parsing UDP packets.
         // layout as its only non-zero field, which is a `u8` array. `u8` arrays
         // are `Immutable`, `TryFromBytes`, `FromZeros`, `FromBytes`,
         // `IntoBytes`, and `Unaligned`.
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
         const _: () = unsafe {
             impl_or_verify!(O => Immutable for $name<O>);
             impl_or_verify!(O => TryFromBytes for $name<O>);
@@ -882,7 +884,7 @@ macro_rules! define_float_conversion {
     ($ty:ty, $bits:ident, $bytes:expr, $from:ident, $to:ident) => {
         // Clippy: The suggestion of using `from_bits()` instead doesn't work
         // because `from_bits` is not const-stable on our MSRV.
-        #[allow(clippy::transmute_int_to_float)]
+        #[allow(clippy::unnecessary_transmutes)]
         pub(crate) const fn $from(bytes: [u8; $bytes]) -> $ty {
             transmute!($bits::$from(bytes))
         }
@@ -890,7 +892,7 @@ macro_rules! define_float_conversion {
         pub(crate) const fn $to(f: $ty) -> [u8; $bytes] {
             // Clippy: The suggestion of using `f.to_bits()` instead doesn't
             // work because `to_bits` is not const-stable on our MSRV.
-            #[allow(clippy::transmute_float_to_int)]
+            #[allow(clippy::unnecessary_transmutes)]
             let bits: $bits = transmute!(f);
             bits.$to()
         }

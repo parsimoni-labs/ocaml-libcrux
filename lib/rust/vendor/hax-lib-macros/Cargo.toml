@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "hax-lib-macros"
-version = "0.3.1"
+version = "0.3.5"
 authors = ["hax Authors"]
 build = false
 autolib = false
@@ -48,7 +48,7 @@ features = [
 [dev-dependencies]
 
 [target."cfg(hax)".dependencies.hax-lib-macros-types]
-version = "=0.3.1"
+version = "=0.3.5"
 
 [target."cfg(hax)".dependencies.proc-macro-error2]
 version = "2.0"

@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use proc_macro::{token_stream, Delimiter, Ident, Span, TokenTree};
+use proc_macro::{token_stream, Delimiter, Group, Ident, Literal, Span, TokenTree};
 use std::iter::Peekable;
 
 pub(crate) enum Segment {
@@ -7,6 +7,7 @@ pub(crate) enum Segment {
     Apostrophe(Span),
     Env(LitStr),
     Modifier(Colon, Ident),
+    Replace(Colon, Group),
 }
 
 pub(crate) struct LitStr {
@@ -68,20 +69,12 @@ pub(crate) fn parse(tokens: &mut Peekable<token_stream::IntoIter>) -> Result<Vec
                             ))
                         }
                     };
-                    let lit_string = lit.to_string();
-                    if lit_string.starts_with('"')
-                        && lit_string.ends_with('"')
-                        && lit_string.len() >= 2
-                    {
-                        // TODO: maybe handle escape sequences in the string if
-                        // someone has a use case.
-                        segments.push(Segment::Env(LitStr {
-                            value: lit_string[1..lit_string.len() - 1].to_owned(),
-                            span: lit.span(),
-                        }));
-                    } else {
-                        return Err(Error::new(lit.span(), "expected string literal"));
-                    }
+
+                    segments.push(Segment::Env(LitStr {
+                        value: get_literal_string_value(&lit, false, false)?,
+                        span: lit.span(),
+                    }));
+
                     if let Some(unexpected) = inner.next() {
                         return Err(Error::new(
                             unexpected.span(),
@@ -117,7 +110,27 @@ pub(crate) fn parse(tokens: &mut Peekable<token_stream::IntoIter>) -> Result<Vec
                             return Err(Error::new(span, "expected identifier after `:`"));
                         }
                     };
-                    segments.push(Segment::Modifier(colon, ident));
+
+                    if ident.to_string().as_str() == "replace" {
+                        let replace = tokens.next();
+
+                        match replace {
+                            Some(TokenTree::Group(group))
+                                if group.delimiter() == Delimiter::Parenthesis =>
+                            {
+                                segments.push(Segment::Replace(colon, group));
+                            }
+                            _ => {
+                                return Err(Error::new2(
+                                    colon.span,
+                                    ident.span(),
+                                    "expected `(` after replace modifier",
+                                ));
+                            }
+                        }
+                    } else {
+                        segments.push(Segment::Modifier(colon, ident));
+                    }
                 }
                 '#' => segments.push(Segment::String(LitStr {
                     value: "#".to_string(),
@@ -270,6 +283,45 @@ pub(crate) fn paste(segments: &[Segment]) -> Result<String> {
                     }
                 }
             }
+            Segment::Replace(colon, group) => {
+                let mut inner_stream = group.stream().into_iter();
+                let from = inner_stream.next();
+                let punct = inner_stream.next();
+                let to = inner_stream.next();
+
+                if let Some(unexpected_token) = inner_stream.next() {
+                    return Err(Error::new(unexpected_token.span(), "expected `)`"));
+                }
+
+                match (from, punct, to) {
+                    (Some(from), Some(TokenTree::Punct(punct)), Some(to))
+                        if punct.as_char() == ',' =>
+                    {
+                        let last =
+                            match evaluated.pop() {
+                                Some(last) => last,
+                                None => return Err(Error::new2(
+                                    colon.span,
+                                    group.span(),
+                                    "replace modifier requires a preceding value to operate on.",
+                                )),
+                            };
+
+                        let from_str = get_token_tree_string_value(&from)?;
+                        let to_str = get_token_tree_string_value(&to)?;
+
+                        let new_ident = last.replace(&from_str, &to_str);
+
+                        evaluated.push(new_ident);
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            group.span(),
+                            "expected replace modifier format: `:replace(\"from\", \"to\")`",
+                        ))
+                    }
+                }
+            }
         }
     }
 
@@ -278,4 +330,29 @@ pub(crate) fn paste(segments: &[Segment]) -> Result<String> {
         pasted.insert(0, '\'');
     }
     Ok(pasted)
+}
+
+fn get_literal_string_value(l: &Literal, parse_char: bool, parse_numbers: bool) -> Result<String> {
+    let l_str = l.to_string();
+
+    if ((l_str.starts_with('"') && l_str.ends_with('"'))
+        || (parse_char && l_str.starts_with('\'') && l_str.ends_with('\'')))
+        && l_str.len() >= 2
+    {
+        // TODO: maybe handle escape sequences in the string if
+        // someone has a use case.
+        Ok(String::from(&l_str[1..l_str.len() - 1]))
+    } else if parse_numbers {
+        Ok(l_str)
+    } else {
+        Err(Error::new(l.span(), "expected string literal"))
+    }
+}
+
+fn get_token_tree_string_value(t: &TokenTree) -> Result<String> {
+    match t {
+        TokenTree::Ident(ident) => Ok(ident.to_string()),
+        TokenTree::Literal(literal) => get_literal_string_value(literal, true, true),
+        _ => Err(Error::new(t.span(), "Expected either Ident, or Literal.")),
+    }
 }

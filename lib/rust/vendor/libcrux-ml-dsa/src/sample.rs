@@ -76,6 +76,7 @@ pub(crate) fn sample_up_to_four_ring_elements_flat<
     start_index: usize,
     elements_requested: usize,
 ) {
+    #[cfg(not(eurydice))]
     debug_assert!(elements_requested <= 4);
 
     // Prepare the seeds
@@ -355,7 +356,7 @@ fn sample_mask_ring_element<SIMDUnit: Operations, Shake256: shake256::DsaXof>(
     result: &mut PolynomialRingElement<SIMDUnit>,
     gamma1_exponent: usize,
 ) {
-    match gamma1_exponent as u8 {
+    match gamma1_exponent {
         17 => {
             let mut out = [0u8; 576];
             Shake256::shake256::<576>(seed, &mut out);
@@ -383,6 +384,7 @@ pub(crate) fn sample_mask_vector<
     mask: &mut [PolynomialRingElement<SIMDUnit>],
 ) {
     // DIMENSION is COLUMNS_IN_A
+    #[cfg(not(eurydice))]
     debug_assert!(dimension == 4 || dimension == 5 || dimension == 7);
     // So we can always sample 4 elements in one go first.
 
@@ -392,7 +394,7 @@ pub(crate) fn sample_mask_vector<
     let seed3 = add_error_domain_separator(seed, *domain_separator + 3);
     *domain_separator += 4;
 
-    match gamma1_exponent as u8 {
+    match gamma1_exponent {
         17 => {
             let mut out0 = [0; 576];
             let mut out1 = [0; 576];

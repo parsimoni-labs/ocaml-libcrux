@@ -174,7 +174,7 @@ pub fn fstar_postprocess_with(attr: pm::TokenStream, item: pm::TokenStream) -> p
     quote! {#[::hax_lib::fstar::before(#payload)] #item}.into()
 }
 
-/// Include this item in the Hax translation.
+/// Include this item in the Hax translation. This overrides any exclusion resulting of `-i` flag.
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn include(attr: pm::TokenStream, item: pm::TokenStream) -> pm::TokenStream {
@@ -496,11 +496,27 @@ pub fn trait_fn_decoration(attr: pm::TokenStream, item: pm::TokenStream) -> pm::
     quote! {#attr #item}.into()
 }
 
-/// Enable the following attrubutes in the annotated item and sub-items:
-/// - (in a struct) `refine`: refine a type with a logical formula
-/// - (on a `fn` in an `impl`) `decreases`, `ensures`, `requires`:
-///   behave exactly as documented above on the proc attributes of the
-///   same name.
+/// Enable the following attrubutes in the annotated item and sub-items.
+///
+/// ### `refine` (on a field in a struct)
+/// Refine a type with a logical formula.
+///
+/// ### `order` (on a field in a struct or an enum)
+/// Reorders a field in the extracted code.
+///
+/// Rust fields order matters for bit-level representation. Similarly, in some
+/// situations, fields order matters in the backends: for instance in F*, one
+/// may refine a field with a formula referring to a later field.
+///
+/// Those two orders may conflict. Adding `#[hax_lib::order(n)]` on a field with
+/// override its order at extraction time.
+///
+/// By default, the order of a field is its index, e.g. the first field has
+/// order 0, the i-th field has order i+1.
+///
+/// ### `decreases`, `ensures` and `requires` (on a `fn` in an `impl`)
+/// `decreases`, `ensures`, `requires`: behave exactly as documented above on
+/// the proc attributes of the same name.
 ///
 /// # Example
 ///
@@ -604,6 +620,33 @@ pub fn attributes(_attr: pm::TokenStream, item: pm::TokenStream) -> pm::TokenStr
                 }
             }
             visit_mut::visit_item_impl_mut(self, item);
+        }
+        fn visit_fields_named_mut(&mut self, fields_named: &mut FieldsNamed) {
+            visit_mut::visit_fields_named_mut(self, fields_named);
+
+            fn handle_reorder_attribute(attrs: &mut [Attribute], errors: &mut Vec<TokenStream>) {
+                let Some((attr, order)) = attrs.iter_mut().find_map(|attr| {
+                    if let Ok(Some(_)) = expects_order(attr.path()) {
+                        let lit: LitInt = attr.parse_args().ok()?;
+                        Some((attr, lit))
+                    } else {
+                        None
+                    }
+                }) else {
+                    return;
+                };
+
+                let Ok(n) = order.base10_parse() else {
+                    errors.push(parse_quote!{const _: () = {compile_error!("Expected a (base 10) i32 literal.")};});
+                    return;
+                };
+                let payload = AttrPayload::Order(n);
+                *attr = parse_quote!(#payload);
+            }
+
+            for field in &mut fields_named.named {
+                handle_reorder_attribute(&mut field.attrs, &mut self.extra_items);
+            }
         }
         fn visit_item_mut(&mut self, item: &mut Item) {
             visit_mut::visit_item_mut(self, item);
@@ -760,33 +803,24 @@ pub fn pv_handwritten(_attr: pm::TokenStream, item: pm::TokenStream) -> pm::Toke
     quote! {#attr #item}.into()
 }
 
-/// Create a mathematical integer. This macro expects a integer
-/// literal that consists in an optional minus sign followed by one or
-/// more digits.
+/// Create a mathematical integer. This macro expects a Rust integer
+/// literal without suffix.
+///
+/// ## Examples:
+/// - `int!(0x101010)`
+/// - `int!(42)`
+/// - `int!(0o52)`
+/// - `int!(0h2A)`
 #[proc_macro_error]
 #[proc_macro]
 pub fn int(payload: pm::TokenStream) -> pm::TokenStream {
-    let mut tokens = payload.into_iter().peekable();
-    let negative = matches!(tokens.peek(), Some(pm::TokenTree::Punct(p)) if p.as_char() == '-');
-    if negative {
-        tokens.next();
+    let n: LitInt = parse_macro_input!(payload);
+    let suffix = n.suffix();
+    if !suffix.is_empty() {
+        abort_call_site!("The literal suffix `{suffix}` was unexpected.")
     }
-    let [pm::TokenTree::Literal(lit)] = &tokens.collect::<Vec<_>>()[..] else {
-        abort_call_site!("Expected exactly one numeric literal");
-    };
-    let lit = format!("{lit}");
-    // Allow negative numbers
-    let mut lit = lit.strip_prefix("-").unwrap_or(lit.as_str()).to_string();
-    if let Some(faulty) = lit.chars().find(|ch| !ch.is_ascii_digit()) {
-        abort_call_site!(format!("Expected a digit, found {faulty}"));
-    }
-    if negative {
-        lit = format!("-{lit}");
-    }
-    quote! {
-        ::hax_lib::int::Int::_unsafe_from_str(#lit)
-    }
-    .into()
+    let digits = n.base10_digits();
+    quote! {::hax_lib::int::Int::_unsafe_from_str(#digits)}.into()
 }
 
 macro_rules! make_quoting_item_proc_macro {
@@ -955,7 +989,7 @@ macro_rules! make_quoting_proc_macro {
     }
 }
 
-make_quoting_proc_macro!(fstar coq proverif);
+make_quoting_proc_macro!(fstar coq proverif lean);
 
 /// Marks a newtype `struct RefinedT(T);` as a refinement type. The
 /// struct should have exactly one unnamed private field.

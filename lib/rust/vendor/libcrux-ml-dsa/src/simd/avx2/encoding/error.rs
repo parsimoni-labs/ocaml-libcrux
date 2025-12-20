@@ -58,6 +58,7 @@ fn serialize_when_eta_is_2(simd_unit: &Vec256, out: &mut [u8]) {
 
     let simd_unit_shifted = mm256_sub_epi32(mm256_set1_epi32(ETA_2), *simd_unit);
 
+    hax_lib::fstar!("reveal_opaque_arithmetic_ops #I32");
     hax_lib::fstar!("i32_lt_pow2_n_to_bit_zero_lemma 3 $simd_unit_shifted");
     let adjacent_6_combined = serialize_when_eta_is_2_aux(simd_unit_shifted);
 
@@ -112,6 +113,7 @@ fn serialize_when_eta_is_4(simd_unit: &Vec256, out: &mut [u8]) {
 
     let simd_unit_shifted = mm256_sub_epi32(mm256_set1_epi32(ETA_4), *simd_unit);
 
+    hax_lib::fstar!("reveal_opaque_arithmetic_ops #I32");
     hax_lib::fstar!("i32_lt_pow2_n_to_bit_zero_lemma 4 $simd_unit_shifted");
     let adjacent_4_combined = serialize_when_eta_is_4_aux(simd_unit_shifted);
 
@@ -154,6 +156,7 @@ pub fn serialize(eta: Eta, simd_unit: &Vec256, serialized: &mut [u8]) {
 /\ (forall (i: nat {i < 256}). i % 32 >= 3 ==> Core_models.Abstractions.Bit.Bit_Zero? ${result}.(mk_int i))
 "#))]
 fn deserialize_to_unsigned_when_eta_is_2(bytes: &[u8]) -> Vec256 {
+    #[cfg(not(eurydice))]
     debug_assert!(bytes.len() == 3);
 
     const COEFFICIENT_MASK: i32 = (1 << 3) - 1;
@@ -182,6 +185,7 @@ fn deserialize_to_unsigned_when_eta_is_2(bytes: &[u8]) -> Vec256 {
 /\ (forall (i: nat {i < 256}). i % 32 >= 4 ==> Core_models.Abstractions.Bit.Bit_Zero? ${result}.(mk_int i))
 "#))]
 fn deserialize_to_unsigned_when_eta_is_4(bytes: &[u8]) -> Vec256 {
+    #[cfg(not(eurydice))]
     debug_assert!(bytes.len() == 4);
 
     const COEFFICIENT_MASK: i32 = (1 << 4) - 1;
@@ -202,16 +206,26 @@ fn deserialize_to_unsigned_when_eta_is_4(bytes: &[u8]) -> Vec256 {
 
     mm256_and_si256(coefficients, mm256_set1_epi32(COEFFICIENT_MASK))
 }
+
 #[inline(always)]
+#[hax_lib::fstar::before(r#"
+let deserialize_to_unsigned_post
+  (eta: Libcrux_ml_dsa.Constants.t_Eta)
+  (serialized: t_Slice u8{Seq.length serialized == (match eta with | Libcrux_ml_dsa.Constants.Eta_Two  -> 3 | Libcrux_ml_dsa.Constants.Eta_Four -> 4)})
+  (result: bv256)
+  = let bytes = Seq.length serialized in
+    (forall (i: nat{i < bytes * 8}).
+       u8_to_bv serialized.[ mk_usize (i / 8) ] (mk_int (i % 8)) ==
+       result.(mk_int ((i / bytes) * 32 + i % bytes))) /\
+    (forall (i: nat{i < 256}).
+       i % 32 >= bytes ==> Core_models.Abstractions.Bit.Bit_Zero? result.(mk_int i))
+"#)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
 #[hax_lib::requires(serialized.len() == match eta {
     Eta::Two => 3,
     Eta::Four => 4,
 })]
-#[hax_lib::ensures(|result| fstar!(r#"
-   let bytes = Seq.length ${serialized} in
-  (forall (i: nat {i < bytes * 8}). u8_to_bv ${serialized}.[mk_usize (i / 8)] (mk_int (i % 8)) == ${result}.(mk_int (i / bytes * 32 + i % bytes)))
-/\ (forall (i: nat {i < 256}). i % 32 >= bytes ==> Core_models.Abstractions.Bit.Bit_Zero? ${result}.(mk_int i))
-"#))]
+#[hax_lib::ensures(|result| fstar!("deserialize_to_unsigned_post $eta $serialized $result"))]
 pub(crate) fn deserialize_to_unsigned(eta: Eta, serialized: &[u8]) -> Vec256 {
     match eta {
         Eta::Two => deserialize_to_unsigned_when_eta_is_2(serialized),
@@ -220,17 +234,40 @@ pub(crate) fn deserialize_to_unsigned(eta: Eta, serialized: &[u8]) -> Vec256 {
 }
 
 #[inline(always)]
+#[hax_lib::fstar::before(r#"
+module C = Libcrux_ml_dsa.Constants
+let deserialize_post (eta: C.t_Eta)
+         (serialized: t_Slice u8 {Seq.length serialized == (match eta with | C.Eta_Two  -> 3 | C.Eta_Four -> 4)})
+         (result: bv256)
+    = let eta_i32:i32 = match eta <: C.t_Eta with | C.Eta_Two  -> mk_i32 2 | C.Eta_Four -> mk_i32 4 in
+      let bytes = Seq.length serialized in
+      (forall i. v (to_i32x8 result i) > minint I32)
+    /\ ( let out_reverted = mk_i32x8 (fun i -> neg (to_i32x8 result i) `add_mod` eta_i32) in
+        deserialize_to_unsigned_post eta serialized out_reverted)
+"#)]
 #[hax_lib::requires(serialized.len() == match eta {
     Eta::Two => 3,
     Eta::Four => 4,
 })]
+#[hax_lib::ensures(|result| fstar!("deserialize_post $eta $serialized ${out}_future"))]
 pub(crate) fn deserialize(eta: Eta, serialized: &[u8], out: &mut Vec256) {
     let unsigned = deserialize_to_unsigned(eta, serialized);
 
     // [eurydice]: https://github.com/AeneasVerif/eurydice/issues/122
-    let eta = match eta {
+    let eta_v = match eta {
         Eta::Two => 2,
         Eta::Four => 4,
     };
-    *out = mm256_sub_epi32(mm256_set1_epi32(eta), unsigned);
+    *out = mm256_sub_epi32(mm256_set1_epi32(eta_v), unsigned);
+    hax_lib::fstar!(
+        r"
+    i32_bit_zero_lemma_to_lt_pow2_n_weak 4 $unsigned;
+    reveal_opaque_arithmetic_ops #I32;
+    let out_reverted: bv256 = mk_i32x8 (fun i -> neg (to_i32x8 $out i) `add_mod` $eta_v) in
+    introduce forall i. neg (to_i32x8 out i) `add_mod` $eta_v == to_i32x8 $unsigned i
+    with rewrite_eq_sub_mod (to_i32x8 out i) $eta_v (to_i32x8 $unsigned i);
+    to_i32x8_eq_to_bv_eq $unsigned out_reverted;
+    assert_norm (deserialize_post $eta $serialized $out == ((forall i. v (to_i32x8 out i) > minint I32) /\ deserialize_to_unsigned_post $eta $serialized out_reverted))
+    "
+    );
 }

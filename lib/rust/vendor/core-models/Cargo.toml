@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "core-models"
-version = "0.0.3-alpha.3"
+version = "0.0.4"
 authors = ["Cryspen"]
 build = false
 autolib = false
@@ -31,11 +31,11 @@ name = "core_models"
 path = "src/lib.rs"
 
 [dependencies]
-pastey = "0.1.0"
+pastey = "0.2.0"
 rand = "0.9"
 
 [dependencies.hax-lib]
-version = "0.3.1"
+version = "=0.3.5"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

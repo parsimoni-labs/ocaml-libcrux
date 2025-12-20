@@ -1,3 +1,5 @@
+#![cfg_attr(hax, allow(unused_unsafe))]
+
 #[cfg(all(target_arch = "x86", not(hax)))]
 pub use core::arch::x86::*;
 #[cfg(all(target_arch = "x86_64", not(hax)))]
@@ -48,6 +50,16 @@ pub fn mm256_storeu_si256_i32(output: &mut [i32], vector: Vec256) {
 #[hax_lib::opaque]
 #[inline(always)]
 pub fn mm_storeu_si128(output: &mut [i16], vector: Vec128) {
+    #[cfg(not(hax))]
+    debug_assert!(output.len() >= 8);
+    unsafe {
+        _mm_storeu_si128(output.as_mut_ptr() as *mut Vec128, vector);
+    }
+}
+
+#[hax_lib::opaque]
+#[inline(always)]
+pub fn mm_storeu_si128_u8(output: &mut [u8], vector: Vec128) {
     #[cfg(not(hax))]
     debug_assert!(output.len() >= 8);
     unsafe {
@@ -111,6 +123,11 @@ pub fn mm256_loadu_si256_i32(input: &[i32]) -> Vec256 {
 #[inline(always)]
 pub fn mm256_setzero_si256() -> Vec256 {
     unsafe { _mm256_setzero_si256() }
+}
+
+#[inline(always)]
+pub fn mm_setzero_si128() -> Vec128 {
+    unsafe { _mm_setzero_si128() }
 }
 
 #[inline(always)]
@@ -439,6 +456,12 @@ pub fn mm256_xor_si256(lhs: Vec256, rhs: Vec256) -> Vec256 {
 
 #[inline(always)]
 #[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_xor_si128(lhs: Vec128, rhs: Vec128) -> Vec128 {
+    unsafe { _mm_xor_si128(lhs, rhs) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
 pub fn mm256_srai_epi16<const SHIFT_BY: i32>(vector: Vec256) -> Vec256 {
     #[cfg(not(hax))]
     debug_assert!(SHIFT_BY >= 0 && SHIFT_BY < 16);
@@ -504,6 +527,22 @@ pub fn mm256_slli_epi32<const SHIFT_BY: i32>(vector: Vec256) -> Vec256 {
 
 #[inline(always)]
 #[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_slli_si128<const SHIFT_BY: i32>(vector: Vec128) -> Vec128 {
+    #[cfg(not(hax))]
+    debug_assert!(SHIFT_BY >= 0 && SHIFT_BY < 16);
+    unsafe { _mm_slli_si128::<SHIFT_BY>(vector) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_srli_si128<const SHIFT_BY: i32>(vector: Vec128) -> Vec128 {
+    #[cfg(not(hax))]
+    debug_assert!(SHIFT_BY >= 0 && SHIFT_BY < 16);
+    unsafe { _mm_srli_si128::<SHIFT_BY>(vector) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
 pub fn mm_shuffle_epi8(vector: Vec128, control: Vec128) -> Vec128 {
     unsafe { _mm_shuffle_epi8(vector, control) }
 }
@@ -524,6 +563,14 @@ pub fn mm256_shuffle_epi32<const CONTROL: i32>(vector: Vec256) -> Vec256 {
 
 #[inline(always)]
 #[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_shuffle_epi32<const CONTROL: i32>(vector: Vec128) -> Vec128 {
+    #[cfg(not(hax))]
+    debug_assert!(CONTROL >= 0 && CONTROL < 256);
+    unsafe { _mm_shuffle_epi32::<CONTROL>(vector) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
 pub fn mm256_permute4x64_epi64<const CONTROL: i32>(vector: Vec256) -> Vec256 {
     #[cfg(not(hax))]
     debug_assert!(CONTROL >= 0 && CONTROL < 256);
@@ -534,6 +581,12 @@ pub fn mm256_permute4x64_epi64<const CONTROL: i32>(vector: Vec256) -> Vec256 {
 #[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
 pub fn mm256_unpackhi_epi64(lhs: Vec256, rhs: Vec256) -> Vec256 {
     unsafe { _mm256_unpackhi_epi64(lhs, rhs) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_unpackhi_epi64(lhs: Vec128, rhs: Vec128) -> Vec128 {
+    unsafe { _mm_unpackhi_epi64(lhs, rhs) }
 }
 
 #[inline(always)]
@@ -701,6 +754,36 @@ pub fn mm256_unpacklo_epi64(lhs: Vec256, rhs: Vec256) -> Vec256 {
 
 #[inline(always)]
 #[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_unpacklo_epi64(lhs: Vec128, rhs: Vec128) -> Vec128 {
+    unsafe { _mm_unpacklo_epi64(lhs, rhs) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
 pub fn mm256_permute2x128_si256<const IMM8: i32>(a: Vec256, b: Vec256) -> Vec256 {
     unsafe { _mm256_permute2x128_si256::<IMM8>(a, b) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_clmulepi64_si128<const IMM8: i32>(a: Vec128, b: Vec128) -> Vec128 {
+    unsafe { _mm_clmulepi64_si128(a, b, IMM8) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_aesenc_si128(a: Vec128, b: Vec128) -> Vec128 {
+    unsafe { _mm_aesenc_si128(a, b) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_aesenclast_si128(a: Vec128, b: Vec128) -> Vec128 {
+    unsafe { _mm_aesenclast_si128(a, b) }
+}
+
+#[inline(always)]
+#[hax_lib::fstar::before(r#"[@@ "opaque_to_smt"]"#)]
+pub fn mm_aeskeygenassist_si128<const RCON: i32>(a: Vec128) -> Vec128 {
+    unsafe { _mm_aeskeygenassist_si128(a, RCON) }
 }

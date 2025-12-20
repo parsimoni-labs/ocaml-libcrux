@@ -12,10 +12,18 @@
 [package]
 edition = "2021"
 name = "libcrux-ml-dsa"
-version = "0.0.3-alpha.3"
+version = "0.0.4"
 authors = ["Cryspen"]
 build = "build.rs"
-publish = false
+exclude = [
+    "boring.sh",
+    "/cg",
+    "*.sh",
+    "*.yaml",
+    "/proofs",
+    "tests/nistkats.rs",
+    "tests/kats",
+]
 autolib = false
 autobins = false
 autoexamples = false
@@ -23,12 +31,13 @@ autotests = false
 autobenches = false
 description = "Libcrux ML-DSA implementation"
 homepage = "https://github.com/cryspen/libcrux"
-readme = "../Readme.md"
+readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/cryspen/libcrux"
 
 [features]
 acvp = []
+codec = ["dep:tls_codec"]
 default = [
     "std",
     "mldsa44",
@@ -75,10 +84,6 @@ name = "acvp"
 path = "tests/acvp.rs"
 
 [[test]]
-name = "nistkats"
-path = "tests/nistkats.rs"
-
-[[test]]
 name = "self"
 path = "tests/self.rs"
 
@@ -115,30 +120,40 @@ path = "benches/ml-dsa.rs"
 harness = false
 
 [dependencies.hax-lib]
-version = "0.3.1"
+version = "=0.3.5"
 
 [dependencies.libcrux-intrinsics]
-version = "0.0.3-alpha.3"
-path = "../libcrux-intrinsics"
+version = "0.0.4"
+path = "../crates/utils/intrinsics"
 
 [dependencies.libcrux-macros]
-version = "=0.0.3-alpha.3"
-path = "../macros"
+version = "=0.0.3"
+path = "../crates/utils/macros"
 
 [dependencies.libcrux-platform]
 version = "0.0.2"
-path = "../sys/platform"
+path = "../crates/sys/platform"
 
 [dependencies.libcrux-sha3]
-version = "0.0.3-alpha.3"
-path = "../libcrux-sha3"
+version = "0.0.4"
+path = "../crates/algorithms/sha3"
+
+[dependencies.tls_codec]
+version = "0.4.2"
+features = ["derive"]
+optional = true
+default-features = false
 
 [dev-dependencies]
-criterion = "0.6"
+criterion = "0.8"
 
 [dev-dependencies.hex]
 version = "0.4.3"
 features = ["serde"]
+
+[dev-dependencies.libcrux-kats]
+path = "../crates/testing/kats"
+features = ["mldsa"]
 
 [dev-dependencies.rand]
 version = "0.9"
@@ -151,7 +166,8 @@ features = ["derive"]
 version = "1.0"
 
 [target."cfg(hax)".dependencies.core-models]
-path = "../fstar-helpers/core-models"
+version = "0.0.4"
+path = "../crates/utils/core-models"
 
 [target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dev-dependencies.pqcrypto-mldsa]
 version = "0.1.0"

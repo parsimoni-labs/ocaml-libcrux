@@ -39,12 +39,31 @@ impl<T: ?Sized> Default for SendSyncPhantomData<T> {
 }
 
 impl<T: ?Sized> PartialEq for SendSyncPhantomData<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
+    fn eq(&self, _other: &Self) -> bool {
+        true
     }
 }
 
 impl<T: ?Sized> Eq for SendSyncPhantomData<T> {}
+
+impl<T: ?Sized> Clone for SendSyncPhantomData<T> {
+    fn clone(&self) -> Self {
+        SendSyncPhantomData(PhantomData)
+    }
+}
+
+#[cfg(miri)]
+extern "Rust" {
+    /// Miri-provided intrinsic that marks the pointer `ptr` as aligned to
+    /// `align`.
+    ///
+    /// This intrinsic is used to inform Miri's symbolic alignment checker that
+    /// a pointer is aligned, even if Miri cannot statically deduce that fact.
+    /// This is often required when performing raw pointer arithmetic or casts
+    /// where the alignment is guaranteed by runtime checks or invariants that
+    /// Miri is not aware of.
+    pub(crate) fn miri_promise_symbolic_alignment(ptr: *const (), align: usize);
+}
 
 pub(crate) trait AsAddress {
     fn addr(self) -> usize;
@@ -140,7 +159,8 @@ pub(crate) const fn padding_needed_for(len: usize, align: NonZeroUsize) -> usize
     #[allow(clippy::arithmetic_side_effects)]
     let mask = align.get() - 1;
 
-    // To efficiently subtract this value from align, we can use the bitwise complement.
+    // To efficiently subtract this value from align, we can use the bitwise
+    // complement.
     // Note that ((!len) & (align-1)) gives us a number that with (len &
     // (align-1)) sums to align-1. So subtracting 1 from x before taking the
     // complement subtracts `len` from `align`. Some quick inspection of
@@ -171,7 +191,8 @@ pub(crate) const fn padding_needed_for(len: usize, align: NonZeroUsize) -> usize
     //
     // (declare-const len (_ BitVec 32))
     // (declare-const align (_ BitVec 32))
-    // ; Search for a case where align is a power of two and padding2 disagrees with padding1
+    // ; Search for a case where align is a power of two and padding2 disagrees
+    // ; with padding1
     // (assert (and (is-power-of-two align)
     //              (not (= (padding1 len align) (padding2 len align)))))
     // (simplify (padding1 (_ bv300 32) (_ bv32 32))) ; 20
@@ -215,7 +236,7 @@ pub(crate) const fn round_down_to_next_multiple_of_alignment(
     }
 
     let align = align.get();
-    #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+    #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
     debug_assert!(align.is_power_of_two());
 
     // Subtraction can't underflow because `align.get() >= 1`.
@@ -281,7 +302,7 @@ pub(crate) const unsafe fn transmute_unchecked<Src, Dst>(src: Src) -> Dst {
     // SAFETY: Since `Transmute<Src, Dst>` is `#[repr(C)]`, its `src` and `dst`
     // fields both start at the same offset and the types of those fields are
     // transparent wrappers around `Src` and `Dst` [1]. Consequently,
-    // initializng `Transmute` with with `src` and then reading out `dst` is
+    // initializing `Transmute` with with `src` and then reading out `dst` is
     // equivalent to transmuting from `Src` to `Dst` [2]. Transmuting from `src`
     // to `Dst` is valid because — by contract on the caller — `src` is a valid
     // instance of `Dst`.
@@ -323,7 +344,7 @@ pub(crate) unsafe fn new_box<T>(
 where
     T: ?Sized + crate::KnownLayout,
 {
-    let size = match meta.size_for_metadata(T::LAYOUT) {
+    let size = match T::size_for_metadata(meta) {
         Some(size) => size,
         None => return Err(AllocError),
     };
@@ -351,7 +372,7 @@ where
         // check ensures their shared safety precondition: that the supplied
         // layout is not zero-sized type [1].
         //
-        // [1] Per https://doc.rust-lang.org/stable/std/alloc/trait.GlobalAlloc.html#tymethod.alloc:
+        // [1] Per https://doc.rust-lang.org/1.81.0/std/alloc/trait.GlobalAlloc.html#tymethod.alloc:
         //
         //     This function is unsafe because undefined behavior can result if
         //     the caller does not ensure that layout has non-zero size.
@@ -362,6 +383,7 @@ where
         }
     } else {
         let align = T::LAYOUT.align.get();
+
         // We use `transmute` instead of an `as` cast since Miri (with strict
         // provenance enabled) notices and complains that an `as` cast creates a
         // pointer with no provenance. Miri isn't smart enough to realize that
@@ -370,7 +392,10 @@ where
         //
         // SAFETY: any initialized bit sequence is a bit-valid `*mut u8`. All
         // bits of a `usize` are initialized.
-        #[allow(clippy::useless_transmute)]
+        //
+        // `#[allow(unknown_lints)]` is for `integer_to_ptr_transmutes`
+        #[allow(unknown_lints)]
+        #[allow(clippy::useless_transmute, integer_to_ptr_transmutes)]
         let dangling = unsafe { mem::transmute::<usize, *mut u8>(align) };
         // SAFETY: `dangling` is constructed from `T::LAYOUT.align`, which is a
         // `NonZeroUsize`, which is guaranteed to be non-zero.
@@ -488,13 +513,17 @@ mod len_of {
             T: KnownLayout<PointerMetadata = usize>,
         {
             let trailing_slice_layout = crate::trailing_slice_layout::<T>();
+
+            // FIXME(#67): Remove this allow. See NumExt for more details.
+            #[allow(
+                unstable_name_collisions,
+                clippy::incompatible_msrv,
+                clippy::multiple_unsafe_ops_per_block
+            )]
             // SAFETY: By invariant on `self`, a `&T` with metadata `self.meta`
             // describes an object of size `<= isize::MAX`. This computes the
             // size of such a `&T` without any trailing padding, and so neither
             // the multiplication nor the addition will overflow.
-            //
-            // FIXME(#67): Remove this allow. See NumExt for more details.
-            #[allow(unstable_name_collisions, clippy::incompatible_msrv)]
             let unpadded_size = unsafe {
                 let trailing_size = self.meta.unchecked_mul(trailing_slice_layout.elem_size);
                 trailing_size.unchecked_add(trailing_slice_layout.offset)
@@ -515,11 +544,15 @@ mod len_of {
                 // This can return `None` if the metadata describes an object
                 // which can't fit in an `isize`.
                 Some(meta) => {
-                    let size = match meta.size_for_metadata(T::LAYOUT) {
+                    let size = match T::size_for_metadata(meta) {
                         Some(size) => size,
                         None => return Err(MetadataCastError::Size),
                     };
-                    DstLayout { align: T::LAYOUT.align, size_info: crate::SizeInfo::Sized { size } }
+                    DstLayout {
+                        align: T::LAYOUT.align,
+                        size_info: crate::SizeInfo::Sized { size },
+                        statically_shallow_unpadded: false,
+                    }
                 }
             };
             // Lemma 0: By contract on `validate_cast_and_convert_metadata`, if
@@ -584,8 +617,9 @@ pub(crate) use len_of::MetadataOf;
 /// exist (stably) on our MSRV. This module provides polyfills for those
 /// features so that we can write more "modern" code, and just remove the
 /// polyfill once our MSRV supports the corresponding feature. Without this,
-/// we'd have to write worse/more verbose code and leave FIXME comments sprinkled
-/// throughout the codebase to update to the new pattern once it's stabilized.
+/// we'd have to write worse/more verbose code and leave FIXME comments
+/// sprinkled throughout the codebase to update to the new pattern once it's
+/// stabilized.
 ///
 /// Each trait is imported as `_` at the crate root; each polyfill should "just
 /// work" at usage sites.
@@ -631,19 +665,19 @@ pub(crate) mod polyfills {
     // FIXME(#67): Once our MSRV is high enough, remove this.
     #[allow(unused)]
     pub(crate) trait NumExt {
-        /// Subtract without checking for underflow.
-        ///
-        /// # Safety
-        ///
-        /// The caller promises that the subtraction will not underflow.
-        unsafe fn unchecked_sub(self, rhs: Self) -> Self;
-
         /// Add without checking for overflow.
         ///
         /// # Safety
         ///
         /// The caller promises that the addition will not overflow.
         unsafe fn unchecked_add(self, rhs: Self) -> Self;
+
+        /// Subtract without checking for underflow.
+        ///
+        /// # Safety
+        ///
+        /// The caller promises that the subtraction will not underflow.
+        unsafe fn unchecked_sub(self, rhs: Self) -> Self;
 
         /// Multiply without checking for overflow.
         ///
@@ -653,10 +687,26 @@ pub(crate) mod polyfills {
         unsafe fn unchecked_mul(self, rhs: Self) -> Self;
     }
 
+    // NOTE on coverage: these will never be tested in nightly since they're
+    // polyfills for a feature which has been stabilized on our nightly
+    // toolchain.
     impl NumExt for usize {
-        // NOTE on coverage: this will never be tested in nightly since it's a
-        // polyfill for a feature which has been stabilized on our nightly
-        // toolchain.
+        #[cfg_attr(
+            all(coverage_nightly, __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
+            coverage(off)
+        )]
+        #[inline(always)]
+        unsafe fn unchecked_add(self, rhs: usize) -> usize {
+            match self.checked_add(rhs) {
+                Some(x) => x,
+                None => {
+                    // SAFETY: The caller promises that the addition will not
+                    // underflow.
+                    unsafe { core::hint::unreachable_unchecked() }
+                }
+            }
+        }
+
         #[cfg_attr(
             all(coverage_nightly, __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
             coverage(off)
@@ -673,28 +723,6 @@ pub(crate) mod polyfills {
             }
         }
 
-        // NOTE on coverage: this will never be tested in nightly since it's a
-        // polyfill for a feature which has been stabilized on our nightly
-        // toolchain.
-        #[cfg_attr(
-            all(coverage_nightly, __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
-            coverage(off)
-        )]
-        #[inline(always)]
-        unsafe fn unchecked_add(self, rhs: usize) -> usize {
-            match self.checked_add(rhs) {
-                Some(x) => x,
-                None => {
-                    // SAFETY: The caller promises that the addition will not
-                    // overflow.
-                    unsafe { core::hint::unreachable_unchecked() }
-                }
-            }
-        }
-
-        // NOTE on coverage: this will never be tested in nightly since it's a
-        // polyfill for a feature which has been stabilized on our nightly
-        // toolchain.
         #[cfg_attr(
             all(coverage_nightly, __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
             coverage(off)
@@ -739,7 +767,7 @@ pub(crate) mod testutil {
     /// A `T` which is guaranteed not to satisfy `align_of::<A>()`.
     ///
     /// It must be the case that `align_of::<T>() < align_of::<A>()` in order
-    /// fot this type to work properly.
+    /// for this type to work properly.
     #[repr(C)]
     pub(crate) struct ForceUnalign<T: Unaligned, A> {
         // The outer struct is aligned to `A`, and, thanks to `repr(C)`, `t` is
@@ -795,13 +823,6 @@ pub(crate) mod testutil {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             Display::fmt(&self.0, f)
         }
-    }
-
-    #[derive(Immutable, FromBytes, Eq, PartialEq, Ord, PartialOrd, Default, Debug, Copy, Clone)]
-    #[repr(C)]
-    pub(crate) struct Nested<T, U: ?Sized> {
-        _t: T,
-        _u: U,
     }
 }
 

@@ -110,7 +110,9 @@ fn un_sized() {
     // - Neither the input nor output types contain any `UnsafeCell`s.
     let candidate = unsafe {
         candidate.cast_unsized_unchecked(|p| {
-            imp::core::ptr::NonNull::new_unchecked(p.as_ptr() as *mut Unsized)
+            let ptr =
+                imp::core::ptr::NonNull::new_unchecked(p.as_non_null().as_ptr() as *mut Unsized);
+            ::zerocopy::pointer::PtrInner::new(ptr)
         })
     };
 
@@ -135,7 +137,8 @@ util_assert_impl_all!(TypeParams<'static, (), imp::IntoIter<()>>: imp::TryFromBy
 util_assert_impl_all!(TypeParams<'static, util::AU16, imp::IntoIter<()>>: imp::TryFromBytes);
 util_assert_impl_all!(TypeParams<'static, [util::AU16], imp::IntoIter<()>>: imp::TryFromBytes);
 
-// Deriving `imp::TryFromBytes` should work if the struct has bounded parameters.
+// Deriving `imp::TryFromBytes` should work if the struct has bounded
+// parameters.
 
 #[derive(imp::TryFromBytes)]
 #[repr(transparent)]

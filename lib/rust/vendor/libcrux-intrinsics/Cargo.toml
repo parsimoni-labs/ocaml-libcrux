@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "libcrux-intrinsics"
-version = "0.0.3-alpha.3"
+version = "0.0.4"
 authors = ["Cryspen"]
 build = "build.rs"
 exclude = ["/proofs"]
@@ -23,7 +23,7 @@ autotests = false
 autobenches = false
 description = "Libcrux intrinsics crate"
 homepage = "https://github.com/cryspen/libcrux"
-readme = "../Readme.md"
+readme = "../../../Readme.md"
 license = "Apache-2.0"
 repository = "https://github.com/cryspen/libcrux"
 
@@ -36,13 +36,13 @@ name = "libcrux_intrinsics"
 path = "src/lib.rs"
 
 [dependencies.hax-lib]
-version = "0.3.1"
+version = "=0.3.5"
 
 [dev-dependencies]
 
 [target."cfg(hax)".dependencies.core-models]
-version = "0.0.3-alpha.3"
-path = "../fstar-helpers/core-models"
+version = "0.0.4"
+path = "../core-models"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

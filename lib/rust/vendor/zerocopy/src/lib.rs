@@ -12,21 +12,18 @@
 //
 //   cargo -q run --manifest-path tools/Cargo.toml -p generate-readme > README.md
 
-//! *<span style="font-size: 100%; color:grey;">Need more out of zerocopy?
-//! Submit a [customer request issue][customer-request-issue]!</span>*
-//!
 //! ***<span style="font-size: 140%">Fast, safe, <span
 //! style="color:red;">compile error</span>. Pick two.</span>***
 //!
 //! Zerocopy makes zero-cost memory manipulation effortless. We write `unsafe`
 //! so you don't have to.
 //!
-//! *Thanks for using zerocopy 0.8! For an overview of what changes from 0.7,
-//! check out our [release notes][release-notes], which include a step-by-step
-//! guide for upgrading from 0.7.*
+//! *For an overview of what's changed from zerocopy 0.7, check out our [release
+//! notes][release-notes], which include a step-by-step upgrading guide.*
 //!
-//! *Have questions? Need help? Ask the maintainers on [GitHub][github-q-a] or
-//! on [Discord][discord]!*
+//! *Have questions? Need more out of zerocopy? Submit a [customer request
+//! issue][customer-request-issue] or ask the maintainers on
+//! [GitHub][github-q-a] or [Discord][discord]!*
 //!
 //! [customer-request-issue]: https://github.com/google/zerocopy/issues/new/choose
 //! [release-notes]: https://github.com/google/zerocopy/discussions/1680
@@ -205,9 +202,9 @@
 //!
 //! # Thanks
 //!
-//! Zerocopy is maintained by engineers at Google and Amazon with help from
-//! [many wonderful contributors][contributors]. Thank you to everyone who has
-//! lent a hand in making Rust a little more secure!
+//! Zerocopy is maintained by engineers at Google with help from [many wonderful
+//! contributors][contributors]. Thank you to everyone who has lent a hand in
+//! making Rust a little more secure!
 //!
 //! [contributors]: https://github.com/google/zerocopy/graphs/contributors
 
@@ -262,6 +259,7 @@
     clippy::indexing_slicing,
     clippy::missing_inline_in_public_items,
     clippy::missing_safety_doc,
+    clippy::multiple_unsafe_ops_per_block,
     clippy::must_use_candidate,
     clippy::must_use_unit,
     clippy::obfuscated_if_else,
@@ -307,12 +305,8 @@
 ))]
 #![cfg_attr(not(any(test, kani, feature = "std")), no_std)]
 #![cfg_attr(
-    all(feature = "simd-nightly", any(target_arch = "x86", target_arch = "x86_64")),
-    feature(stdarch_x86_avx512)
-)]
-#![cfg_attr(
     all(feature = "simd-nightly", target_arch = "arm"),
-    feature(stdarch_arm_dsp, stdarch_arm_neon_intrinsics)
+    feature(stdarch_arm_neon_intrinsics)
 )]
 #![cfg_attr(
     all(feature = "simd-nightly", any(target_arch = "powerpc", target_arch = "powerpc64")),
@@ -320,9 +314,10 @@
 )]
 #![cfg_attr(feature = "float-nightly", feature(f16, f128))]
 #![cfg_attr(doc_cfg, feature(doc_cfg))]
+#![cfg_attr(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS, feature(coverage_attribute))]
 #![cfg_attr(
-    __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS,
-    feature(layout_for_ptr, coverage_attribute)
+    any(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS, miri),
+    feature(layout_for_ptr)
 )]
 
 // This is a hack to allow zerocopy-derive derives to work in this crate. They
@@ -338,6 +333,10 @@ pub mod util;
 pub mod byte_slice;
 pub mod byteorder;
 mod deprecated;
+
+#[doc(hidden)]
+pub mod doctests;
+
 // This module is `pub` so that zerocopy's error types and error handling
 // documentation is grouped together in a cohesive module. In practice, we
 // expect most users to use the re-export of `error`'s items to avoid identifier
@@ -354,13 +353,6 @@ mod split_at;
 // FIXME(#252): If we make this pub, come up with a better name.
 mod wrappers;
 
-pub use crate::byte_slice::*;
-pub use crate::byteorder::*;
-pub use crate::error::*;
-pub use crate::r#ref::*;
-pub use crate::split_at::{Split, SplitAt};
-pub use crate::wrappers::*;
-
 use core::{
     cell::{Cell, UnsafeCell},
     cmp::Ordering,
@@ -376,28 +368,34 @@ use core::{
     ptr::{self, NonNull},
     slice,
 };
-
 #[cfg(feature = "std")]
 use std::io;
 
 use crate::pointer::invariant::{self, BecauseExclusive};
+pub use crate::{
+    byte_slice::*,
+    byteorder::*,
+    error::*,
+    r#ref::*,
+    split_at::{Split, SplitAt},
+    wrappers::*,
+};
 
 #[cfg(any(feature = "alloc", test, kani))]
 extern crate alloc;
 #[cfg(any(feature = "alloc", test))]
 use alloc::{boxed::Box, vec::Vec};
-use util::MetadataOf;
-
 #[cfg(any(feature = "alloc", test))]
 use core::alloc::Layout;
 
-// Used by `TryFromBytes::is_bit_valid`.
-#[doc(hidden)]
-pub use crate::pointer::{invariant::BecauseImmutable, Maybe, Ptr};
+use util::MetadataOf;
+
 // Used by `KnownLayout`.
 #[doc(hidden)]
 pub use crate::layout::*;
-
+// Used by `TryFromBytes::is_bit_valid`.
+#[doc(hidden)]
+pub use crate::pointer::{invariant::BecauseImmutable, Maybe, Ptr};
 // For each trait polyfill, as soon as the corresponding feature is stable, the
 // polyfill import will be unused because method/function resolution will prefer
 // the inherent method/function over a trait method/function. Thus, we suppress
@@ -434,9 +432,6 @@ const _: () = {
 //
 // The "note" provides enough context to make it easy to figure out how to fix
 // the error.
-#[allow(unused)]
-use {FromZeros as FromZeroes, IntoBytes as AsBytes, Ref as LayoutVerified};
-
 /// Implements [`KnownLayout`].
 ///
 /// This derive analyzes various aspects of a type's layout that are needed for
@@ -539,6 +534,8 @@ use {FromZeros as FromZeroes, IntoBytes as AsBytes, Ref as LayoutVerified};
 #[cfg(any(feature = "derive", test))]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "derive")))]
 pub use zerocopy_derive::KnownLayout;
+#[allow(unused)]
+use {FromZeros as FromZeroes, IntoBytes as AsBytes, Ref as LayoutVerified};
 
 /// Indicates that zerocopy can reason about certain aspects of a type's layout.
 ///
@@ -618,7 +615,7 @@ pub use zerocopy_derive::KnownLayout;
 /// example.
 ///
 /// A `#[repr(C)]` slice DST is laid out [just like sized `#[repr(C)]`
-/// types][repr-c-structs], but the presenence of a variable-length field
+/// types][repr-c-structs], but the presence of a variable-length field
 /// introduces the possibility of *dynamic padding*. In particular, it may be
 /// necessary to add trailing padding *after* the trailing slice field in order
 /// to satisfy the outer type's alignment, and the amount of padding required
@@ -728,7 +725,7 @@ pub use zerocopy_derive::KnownLayout;
     doc = concat!("[derive]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.KnownLayout.html"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(KnownLayout)]` to `{Self}`")
 )]
 pub unsafe trait KnownLayout {
@@ -809,6 +806,45 @@ pub unsafe trait KnownLayout {
         let meta = Self::pointer_to_metadata(ptr.as_ptr());
         // SAFETY: `size_for_metadata` promises to only return `None` if the
         // resulting size would not fit in a `usize`.
+        Self::size_for_metadata(meta)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    #[inline(always)]
+    fn raw_dangling() -> NonNull<Self> {
+        let meta = Self::PointerMetadata::from_elem_count(0);
+        Self::raw_from_ptr_len(NonNull::dangling(), meta)
+    }
+
+    /// Computes the size of an object of type `Self` with the given pointer
+    /// metadata.
+    ///
+    /// # Safety
+    ///
+    /// `size_for_metadata` promises to return `None` if and only if the
+    /// resulting size would not fit in a `usize`. Note that the returned size
+    /// could exceed the actual maximum valid size of an allocated object,
+    /// `isize::MAX`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zerocopy::KnownLayout;
+    ///
+    /// assert_eq!(u8::size_for_metadata(()), Some(1));
+    /// assert_eq!(u16::size_for_metadata(()), Some(2));
+    /// assert_eq!(<[u8]>::size_for_metadata(42), Some(42));
+    /// assert_eq!(<[u16]>::size_for_metadata(42), Some(84));
+    ///
+    /// // This size exceeds the maximum valid object size (`isize::MAX`):
+    /// assert_eq!(<[u8]>::size_for_metadata(usize::MAX), Some(usize::MAX));
+    ///
+    /// // This size, if computed, would exceed `usize::MAX`:
+    /// assert_eq!(<[u16]>::size_for_metadata(usize::MAX), None);
+    /// ```
+    #[inline(always)]
+    fn size_for_metadata(meta: Self::PointerMetadata) -> Option<usize> {
         meta.size_for_metadata(Self::LAYOUT)
     }
 }
@@ -858,7 +894,7 @@ pub trait PointerMetadata: Copy + Eq + Debug {
     ///
     /// `size_for_metadata` promises to only return `None` if the resulting size
     /// would not fit in a `usize`.
-    fn size_for_metadata(&self, layout: DstLayout) -> Option<usize>;
+    fn size_for_metadata(self, layout: DstLayout) -> Option<usize>;
 }
 
 impl PointerMetadata for () {
@@ -867,7 +903,7 @@ impl PointerMetadata for () {
     fn from_elem_count(_elems: usize) -> () {}
 
     #[inline]
-    fn size_for_metadata(&self, layout: DstLayout) -> Option<usize> {
+    fn size_for_metadata(self, layout: DstLayout) -> Option<usize> {
         match layout.size_info {
             SizeInfo::Sized { size } => Some(size),
             // NOTE: This branch is unreachable, but we return `None` rather
@@ -884,10 +920,10 @@ impl PointerMetadata for usize {
     }
 
     #[inline]
-    fn size_for_metadata(&self, layout: DstLayout) -> Option<usize> {
+    fn size_for_metadata(self, layout: DstLayout) -> Option<usize> {
         match layout.size_info {
             SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size }) => {
-                let slice_len = elem_size.checked_mul(*self)?;
+                let slice_len = elem_size.checked_mul(self)?;
                 let without_padding = offset.checked_add(slice_len)?;
                 without_padding.checked_add(util::padding_needed_for(without_padding, layout.align))
             }
@@ -1026,6 +1062,7 @@ impl_known_layout!(const N: usize, T => [T; N]);
 // [3] Per https://doc.rust-lang.org/1.85.0/core/cell/struct.Cell.html#memory-layout:
 //
 //   `Cell<T>` has the same in-memory representation as `T`.
+#[allow(clippy::multiple_unsafe_ops_per_block)]
 const _: () = unsafe {
     unsafe_impl_known_layout!(
         #[repr([u8])]
@@ -1143,7 +1180,6 @@ const _: () = unsafe {
 #[cfg(any(feature = "derive", test))]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "derive")))]
 pub use zerocopy_derive::FromZeros;
-
 /// Analyzes whether a type is [`Immutable`].
 ///
 /// This derive analyzes, at compile time, whether the annotated type satisfies
@@ -1267,7 +1303,7 @@ pub use zerocopy_derive::Immutable;
     doc = concat!("[derive-analysis]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.Immutable.html#analysis"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(Immutable)]` to `{Self}`")
 )]
 pub unsafe trait Immutable {
@@ -1396,7 +1432,7 @@ pub use zerocopy_derive::TryFromBytes;
 /// definitely invalid.
 ///
 /// Zerocopy takes a conservative approach, and only considers a bit pattern to
-/// be valid if its validity is a documenteed guarantee provided by the
+/// be valid if its validity is a documented guarantee provided by the
 /// language.
 ///
 /// For most use cases, Rust's current guarantees align with programmers'
@@ -1437,7 +1473,7 @@ pub use zerocopy_derive::TryFromBytes;
     doc = concat!("[derive]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.TryFromBytes.html"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(TryFromBytes)]` to `{Self}`")
 )]
 pub unsafe trait TryFromBytes {
@@ -2986,7 +3022,7 @@ unsafe fn try_read_from<S, T: TryFromBytes>(
     doc = concat!("[derive-analysis]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.FromZeros.html#analysis"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(FromZeros)]` to `{Self}`")
 )]
 pub unsafe trait FromZeros: TryFromBytes {
@@ -3122,7 +3158,7 @@ pub unsafe trait FromZeros: TryFromBytes {
             // is sufficiently aligned. Since the produced pointer is a
             // `NonNull`, it is non-null.
             //
-            // [1] Per https://doc.rust-lang.org/nightly/std/boxed/index.html#memory-layout:
+            // [1] Per https://doc.rust-lang.org/1.81.0/std/boxed/index.html#memory-layout:
             //
             //   For zero-sized values, the `Box` pointer has to be non-null and sufficiently aligned.
             //
@@ -3225,7 +3261,7 @@ pub unsafe trait FromZeros: TryFromBytes {
 
     /// Extends a `Vec<Self>` by pushing `additional` new items onto the end of
     /// the vector. The new items are initialized with zeros.
-    #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+    #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
     #[cfg(feature = "alloc")]
     #[cfg_attr(doc_cfg, doc(cfg(all(rust = "1.57.0", feature = "alloc"))))]
     #[inline(always)]
@@ -3244,7 +3280,7 @@ pub unsafe trait FromZeros: TryFromBytes {
     /// # Panics
     ///
     /// Panics if `position > v.len()`.
-    #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+    #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
     #[cfg(feature = "alloc")]
     #[cfg_attr(doc_cfg, doc(cfg(all(rust = "1.57.0", feature = "alloc"))))]
     #[inline]
@@ -3267,6 +3303,7 @@ pub unsafe trait FromZeros: TryFromBytes {
         //
         // `v.len() - position` cannot overflow because we asserted that
         // `position <= v.len()`.
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
         unsafe {
             // This is a potentially overlapping copy.
             let ptr = v.as_mut_ptr();
@@ -3348,12 +3385,10 @@ pub unsafe trait FromZeros: TryFromBytes {
 ///
 /// - If the type is a struct, all of its fields must be `FromBytes`.
 /// - If the type is an enum:
-///   - It must have a defined representation (`repr`s `C`, `u8`, `u16`, `u32`,
-///     `u64`, `usize`, `i8`, `i16`, `i32`, `i64`, or `isize`).
+///   - It must have a defined representation which is one of `u8`, `u16`, `i8`,
+///     or `i16`.
 ///   - The maximum number of discriminants must be used (so that every possible
-///     bit pattern is a valid one). Be very careful when using the `C`,
-///     `usize`, or `isize` representations, as their size is
-///     platform-dependent.
+///     bit pattern is a valid one).
 ///   - Its fields must be `FromBytes`.
 ///
 /// This analysis is subject to change. Unsafe code may *only* rely on the
@@ -3386,8 +3421,6 @@ pub unsafe trait FromZeros: TryFromBytes {
 ///
 /// Whether a struct is soundly `FromBytes` therefore solely depends on whether
 /// its fields are `FromBytes`.
-// FIXME(#146): Document why we don't require an enum to have an explicit `repr`
-// attribute.
 #[cfg(any(feature = "derive", test))]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "derive")))]
 pub use zerocopy_derive::FromBytes;
@@ -3504,7 +3537,7 @@ pub use zerocopy_derive::FromBytes;
     doc = concat!("[derive-analysis]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.FromBytes.html#analysis"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(FromBytes)]` to `{Self}`")
 )]
 pub unsafe trait FromBytes: FromZeros {
@@ -3827,7 +3860,7 @@ pub unsafe trait FromBytes: FromZeros {
     {
         static_assert_dst_is_not_zst!(Self);
         match Ptr::from_mut(source).try_cast_into_no_leftover::<_, BecauseExclusive>(None) {
-            Ok(ptr) => Ok(ptr.recall_validity().as_mut()),
+            Ok(ptr) => Ok(ptr.recall_validity::<_, (_, (_, _))>().as_mut()),
             Err(err) => Err(err.map_src(|src| src.as_mut())),
         }
     }
@@ -4633,6 +4666,7 @@ pub unsafe trait FromBytes: FromZeros {
     /// let header = BitmapFileHeader::read_from_io(&mut file).unwrap();
     /// ```
     #[cfg(feature = "std")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
     #[inline(always)]
     fn read_from_io<R>(mut src: R) -> io::Result<Self>
     where
@@ -4777,7 +4811,7 @@ fn mut_from_prefix_suffix<T: FromBytes + IntoBytes + KnownLayout + ?Sized>(
     let (slf, prefix_suffix) = Ptr::from_mut(source)
         .try_cast_into::<_, BecauseExclusive>(cast_type, meta)
         .map_err(|err| err.map_src(|s| s.as_mut()))?;
-    Ok((slf.recall_validity().as_mut(), prefix_suffix.as_mut()))
+    Ok((slf.recall_validity::<_, (_, (_, _))>().as_mut(), prefix_suffix.as_mut()))
 }
 
 /// Analyzes whether a type is [`IntoBytes`].
@@ -4957,7 +4991,7 @@ pub use zerocopy_derive::IntoBytes;
     doc = concat!("[derive-analysis]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.IntoBytes.html#analysis"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(IntoBytes)]` to `{Self}`")
 )]
 pub unsafe trait IntoBytes {
@@ -5156,6 +5190,7 @@ pub unsafe trait IntoBytes {
     /// ```
     #[must_use = "callers should check the return value to see if the operation succeeded"]
     #[inline]
+    #[allow(clippy::mut_from_ref)] // False positive: `&self -> &mut [u8]`
     fn write_to(&self, dst: &mut [u8]) -> Result<(), SizeError<&Self, &mut [u8]>>
     where
         Self: Immutable,
@@ -5213,15 +5248,16 @@ pub unsafe trait IntoBytes {
     /// ```
     /// # use zerocopy::IntoBytes;
     /// # let header = u128::MAX;
-    /// let mut insufficent_bytes = &mut [0, 0][..];
+    /// let mut insufficient_bytes = &mut [0, 0][..];
     ///
-    /// let write_result = header.write_to_suffix(insufficent_bytes);
+    /// let write_result = header.write_to_suffix(insufficient_bytes);
     ///
     /// assert!(write_result.is_err());
-    /// assert_eq!(insufficent_bytes, [0, 0]);
+    /// assert_eq!(insufficient_bytes, [0, 0]);
     /// ```
     #[must_use = "callers should check the return value to see if the operation succeeded"]
     #[inline]
+    #[allow(clippy::mut_from_ref)] // False positive: `&self -> &mut [u8]`
     fn write_to_prefix(&self, dst: &mut [u8]) -> Result<(), SizeError<&Self, &mut [u8]>>
     where
         Self: Immutable,
@@ -5274,12 +5310,12 @@ pub unsafe trait IntoBytes {
     ///
     /// assert_eq!(bytes, [0, 0, 0, 1, 2, 3, 4, 5, 6, 7]);
     ///
-    /// let mut insufficent_bytes = &mut [0, 0][..];
+    /// let mut insufficient_bytes = &mut [0, 0][..];
     ///
-    /// let write_result = header.write_to_suffix(insufficent_bytes);
+    /// let write_result = header.write_to_suffix(insufficient_bytes);
     ///
     /// assert!(write_result.is_err());
-    /// assert_eq!(insufficent_bytes, [0, 0]);
+    /// assert_eq!(insufficient_bytes, [0, 0]);
     /// ```
     ///
     /// If insufficient target bytes are provided, `write_to_suffix` returns
@@ -5288,15 +5324,16 @@ pub unsafe trait IntoBytes {
     /// ```
     /// # use zerocopy::IntoBytes;
     /// # let header = u128::MAX;
-    /// let mut insufficent_bytes = &mut [0, 0][..];
+    /// let mut insufficient_bytes = &mut [0, 0][..];
     ///
-    /// let write_result = header.write_to_suffix(insufficent_bytes);
+    /// let write_result = header.write_to_suffix(insufficient_bytes);
     ///
     /// assert!(write_result.is_err());
-    /// assert_eq!(insufficent_bytes, [0, 0]);
+    /// assert_eq!(insufficient_bytes, [0, 0]);
     /// ```
     #[must_use = "callers should check the return value to see if the operation succeeded"]
     #[inline]
+    #[allow(clippy::mut_from_ref)] // False positive: `&self -> &mut [u8]`
     fn write_to_suffix(&self, dst: &mut [u8]) -> Result<(), SizeError<&Self, &mut [u8]>>
     where
         Self: Immutable,
@@ -5352,7 +5389,7 @@ pub unsafe trait IntoBytes {
     /// ```
     ///
     /// If the write fails, `write_to_io` returns `Err` and a partial write may
-    /// have occured; e.g.:
+    /// have occurred; e.g.:
     ///
     /// ```
     /// # use zerocopy::IntoBytes;
@@ -5366,6 +5403,7 @@ pub unsafe trait IntoBytes {
     /// assert_eq!(dst, [255, 255]);
     /// ```
     #[cfg(feature = "std")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "std")))]
     #[inline(always)]
     fn write_to_io<W>(&self, mut dst: W) -> io::Result<()>
     where
@@ -5516,7 +5554,7 @@ pub use zerocopy_derive::Unaligned;
     doc = concat!("[derive-analysis]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.Unaligned.html#analysis"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(Unaligned)]` to `{Self}`")
 )]
 pub unsafe trait Unaligned {
@@ -5527,45 +5565,6 @@ pub unsafe trait Unaligned {
     where
         Self: Sized;
 }
-
-/// Derives an optimized [`Hash`] implementation.
-///
-/// This derive can be applied to structs and enums implementing both
-/// [`Immutable`] and [`IntoBytes`]; e.g.:
-///
-/// ```
-/// # use zerocopy_derive::{ByteHash, Immutable, IntoBytes};
-/// #[derive(ByteHash, Immutable, IntoBytes)]
-/// #[repr(C)]
-/// struct MyStruct {
-/// # /*
-///     ...
-/// # */
-/// }
-///
-/// #[derive(ByteHash, Immutable, IntoBytes)]
-/// #[repr(u8)]
-/// enum MyEnum {
-/// #   Variant,
-/// # /*
-///     ...
-/// # */
-/// }
-/// ```
-///
-/// The standard library's [`derive(Hash)`][derive@Hash] produces hashes by
-/// individually hashing each field and combining the results. Instead, the
-/// implementations of [`Hash::hash()`] and [`Hash::hash_slice()`] generated by
-/// `derive(ByteHash)` convert the entirey of `self` to a byte slice and hashes
-/// it in a single call to [`Hasher::write()`]. This may have performance
-/// advantages.
-///
-/// [`Hash`]: core::hash::Hash
-/// [`Hash::hash()`]: core::hash::Hash::hash()
-/// [`Hash::hash_slice()`]: core::hash::Hash::hash_slice()
-#[cfg(any(feature = "derive", test))]
-#[cfg_attr(doc_cfg, doc(cfg(feature = "derive")))]
-pub use zerocopy_derive::ByteHash;
 
 /// Derives optimized [`PartialEq`] and [`Eq`] implementations.
 ///
@@ -5594,13 +5593,50 @@ pub use zerocopy_derive::ByteHash;
 ///
 /// The standard library's [`derive(Eq, PartialEq)`][derive@PartialEq] computes
 /// equality by individually comparing each field. Instead, the implementation
-/// of [`PartialEq::eq`] emitted by `derive(ByteHash)` converts the entirey of
+/// of [`PartialEq::eq`] emitted by `derive(ByteHash)` converts the entirety of
 /// `self` and `other` to byte slices and compares those slices for equality.
 /// This may have performance advantages.
 #[cfg(any(feature = "derive", test))]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "derive")))]
 pub use zerocopy_derive::ByteEq;
-
+/// Derives an optimized [`Hash`] implementation.
+///
+/// This derive can be applied to structs and enums implementing both
+/// [`Immutable`] and [`IntoBytes`]; e.g.:
+///
+/// ```
+/// # use zerocopy_derive::{ByteHash, Immutable, IntoBytes};
+/// #[derive(ByteHash, Immutable, IntoBytes)]
+/// #[repr(C)]
+/// struct MyStruct {
+/// # /*
+///     ...
+/// # */
+/// }
+///
+/// #[derive(ByteHash, Immutable, IntoBytes)]
+/// #[repr(u8)]
+/// enum MyEnum {
+/// #   Variant,
+/// # /*
+///     ...
+/// # */
+/// }
+/// ```
+///
+/// The standard library's [`derive(Hash)`][derive@Hash] produces hashes by
+/// individually hashing each field and combining the results. Instead, the
+/// implementations of [`Hash::hash()`] and [`Hash::hash_slice()`] generated by
+/// `derive(ByteHash)` convert the entirety of `self` to a byte slice and hashes
+/// it in a single call to [`Hasher::write()`]. This may have performance
+/// advantages.
+///
+/// [`Hash`]: core::hash::Hash
+/// [`Hash::hash()`]: core::hash::Hash::hash()
+/// [`Hash::hash_slice()`]: core::hash::Hash::hash_slice()
+#[cfg(any(feature = "derive", test))]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "derive")))]
+pub use zerocopy_derive::ByteHash;
 /// Implements [`SplitAt`].
 ///
 /// This derive can be applied to structs; e.g.:
@@ -5621,13 +5657,13 @@ pub use zerocopy_derive::SplitAt;
 
 #[cfg(feature = "alloc")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "alloc")))]
-#[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+#[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
 mod alloc_support {
     use super::*;
 
     /// Extends a `Vec<T>` by pushing `additional` new items onto the end of the
     /// vector. The new items are initialized with zeros.
-    #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+    #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
     #[doc(hidden)]
     #[deprecated(since = "0.8.0", note = "moved to `FromZeros`")]
     #[inline(always)]
@@ -5644,7 +5680,7 @@ mod alloc_support {
     /// # Panics
     ///
     /// Panics if `position > v.len()`.
-    #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+    #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
     #[doc(hidden)]
     #[deprecated(since = "0.8.0", note = "moved to `FromZeros`")]
     #[inline(always)]
@@ -5658,7 +5694,7 @@ mod alloc_support {
 }
 
 #[cfg(feature = "alloc")]
-#[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+#[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
 #[doc(hidden)]
 pub use alloc_support::*;
 
@@ -5705,26 +5741,30 @@ mod tests {
             };
         }
 
-        let layout = |offset, align, _trailing_slice_elem_size| DstLayout {
-            align: NonZeroUsize::new(align).unwrap(),
-            size_info: match _trailing_slice_elem_size {
-                None => SizeInfo::Sized { size: offset },
-                Some(elem_size) => SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size }),
-            },
-        };
+        let layout =
+            |offset, align, trailing_slice_elem_size, statically_shallow_unpadded| DstLayout {
+                align: NonZeroUsize::new(align).unwrap(),
+                size_info: match trailing_slice_elem_size {
+                    None => SizeInfo::Sized { size: offset },
+                    Some(elem_size) => {
+                        SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size })
+                    }
+                },
+                statically_shallow_unpadded,
+            };
 
-        test!((), layout(0, 1, None));
-        test!(u8, layout(1, 1, None));
+        test!((), layout(0, 1, None, false));
+        test!(u8, layout(1, 1, None, false));
         // Use `align_of` because `u64` alignment may be smaller than 8 on some
         // platforms.
-        test!(u64, layout(8, mem::align_of::<u64>(), None));
-        test!(AU64, layout(8, 8, None));
+        test!(u64, layout(8, mem::align_of::<u64>(), None, false));
+        test!(AU64, layout(8, 8, None, false));
 
         test!(Option<&'static ()>, usize::LAYOUT);
 
-        test!([()], layout(0, 1, Some(0)));
-        test!([u8], layout(0, 1, Some(1)));
-        test!(str, layout(0, 1, Some(1)));
+        test!([()], layout(0, 1, Some(0), true));
+        test!([u8], layout(0, 1, Some(1), true));
+        test!(str, layout(0, 1, Some(1), true));
     }
 
     #[cfg(feature = "derive")]
@@ -5779,11 +5819,13 @@ mod tests {
         let sized_layout = |align, size| DstLayout {
             align: NonZeroUsize::new(align).unwrap(),
             size_info: SizeInfo::Sized { size },
+            statically_shallow_unpadded: false,
         };
 
-        let unsized_layout = |align, elem_size, offset| DstLayout {
+        let unsized_layout = |align, elem_size, offset, statically_shallow_unpadded| DstLayout {
             align: NonZeroUsize::new(align).unwrap(),
             size_info: SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size }),
+            statically_shallow_unpadded,
         };
 
         // | `repr(C)`? | generic? | `KnownLayout`? | `Sized`? | Type Name |
@@ -5911,7 +5953,7 @@ mod tests {
             .pad_to_align();
 
         assert_eq!(<KL10 as KnownLayout>::LAYOUT, expected);
-        assert_eq!(<KL10 as KnownLayout>::LAYOUT, unsized_layout(4, 1, 4));
+        assert_eq!(<KL10 as KnownLayout>::LAYOUT, unsized_layout(4, 1, 4, false));
 
         // ...with `align(N)`:
         #[allow(dead_code)]
@@ -5927,7 +5969,7 @@ mod tests {
             .pad_to_align();
 
         assert_eq!(<KL10Align as KnownLayout>::LAYOUT, expected);
-        assert_eq!(<KL10Align as KnownLayout>::LAYOUT, unsized_layout(64, 1, 4));
+        assert_eq!(<KL10Align as KnownLayout>::LAYOUT, unsized_layout(64, 1, 4, false));
 
         // ...with `packed`:
         #[allow(dead_code)]
@@ -5943,7 +5985,7 @@ mod tests {
             .pad_to_align();
 
         assert_eq!(<KL10Packed as KnownLayout>::LAYOUT, expected);
-        assert_eq!(<KL10Packed as KnownLayout>::LAYOUT, unsized_layout(1, 1, 4));
+        assert_eq!(<KL10Packed as KnownLayout>::LAYOUT, unsized_layout(1, 1, 4, false));
 
         // ...with `packed(N)`:
         #[allow(dead_code)]
@@ -5959,7 +6001,7 @@ mod tests {
             .pad_to_align();
 
         assert_eq!(<KL10PackedN as KnownLayout>::LAYOUT, expected);
-        assert_eq!(<KL10PackedN as KnownLayout>::LAYOUT, unsized_layout(2, 1, 4));
+        assert_eq!(<KL10PackedN as KnownLayout>::LAYOUT, unsized_layout(2, 1, 4, false));
 
         // | `repr(C)`? | generic? | `KnownLayout`? | `Sized`? | Type Name |
         // |          Y |        N |              Y |        Y |      KL11 |
@@ -6065,11 +6107,11 @@ mod tests {
 
         assert_eq!(<KLTU<(), AU16> as KnownLayout>::LAYOUT, sized_layout(2, 2));
 
-        assert_eq!(<KLTU<(), [()]> as KnownLayout>::LAYOUT, unsized_layout(1, 0, 0));
+        assert_eq!(<KLTU<(), [()]> as KnownLayout>::LAYOUT, unsized_layout(1, 0, 0, false));
 
-        assert_eq!(<KLTU<(), [u8]> as KnownLayout>::LAYOUT, unsized_layout(1, 1, 0));
+        assert_eq!(<KLTU<(), [u8]> as KnownLayout>::LAYOUT, unsized_layout(1, 1, 0, false));
 
-        assert_eq!(<KLTU<(), [AU16]> as KnownLayout>::LAYOUT, unsized_layout(2, 2, 0));
+        assert_eq!(<KLTU<(), [AU16]> as KnownLayout>::LAYOUT, unsized_layout(2, 2, 0, false));
 
         assert_eq!(<KLTU<u8, ()> as KnownLayout>::LAYOUT, sized_layout(1, 1));
 
@@ -6077,11 +6119,11 @@ mod tests {
 
         assert_eq!(<KLTU<u8, AU16> as KnownLayout>::LAYOUT, sized_layout(2, 4));
 
-        assert_eq!(<KLTU<u8, [()]> as KnownLayout>::LAYOUT, unsized_layout(1, 0, 1));
+        assert_eq!(<KLTU<u8, [()]> as KnownLayout>::LAYOUT, unsized_layout(1, 0, 1, false));
 
-        assert_eq!(<KLTU<u8, [u8]> as KnownLayout>::LAYOUT, unsized_layout(1, 1, 1));
+        assert_eq!(<KLTU<u8, [u8]> as KnownLayout>::LAYOUT, unsized_layout(1, 1, 1, false));
 
-        assert_eq!(<KLTU<u8, [AU16]> as KnownLayout>::LAYOUT, unsized_layout(2, 2, 2));
+        assert_eq!(<KLTU<u8, [AU16]> as KnownLayout>::LAYOUT, unsized_layout(2, 2, 2, false));
 
         assert_eq!(<KLTU<AU16, ()> as KnownLayout>::LAYOUT, sized_layout(2, 2));
 
@@ -6089,11 +6131,11 @@ mod tests {
 
         assert_eq!(<KLTU<AU16, AU16> as KnownLayout>::LAYOUT, sized_layout(2, 4));
 
-        assert_eq!(<KLTU<AU16, [()]> as KnownLayout>::LAYOUT, unsized_layout(2, 0, 2));
+        assert_eq!(<KLTU<AU16, [()]> as KnownLayout>::LAYOUT, unsized_layout(2, 0, 2, false));
 
-        assert_eq!(<KLTU<AU16, [u8]> as KnownLayout>::LAYOUT, unsized_layout(2, 1, 2));
+        assert_eq!(<KLTU<AU16, [u8]> as KnownLayout>::LAYOUT, unsized_layout(2, 1, 2, false));
 
-        assert_eq!(<KLTU<AU16, [AU16]> as KnownLayout>::LAYOUT, unsized_layout(2, 2, 2));
+        assert_eq!(<KLTU<AU16, [AU16]> as KnownLayout>::LAYOUT, unsized_layout(2, 2, 2, false));
 
         // Test a variety of field counts.
 
@@ -6107,25 +6149,25 @@ mod tests {
         #[repr(C)]
         struct KLF1([u8]);
 
-        assert_eq!(<KLF1 as KnownLayout>::LAYOUT, unsized_layout(1, 1, 0));
+        assert_eq!(<KLF1 as KnownLayout>::LAYOUT, unsized_layout(1, 1, 0, true));
 
         #[derive(KnownLayout)]
         #[repr(C)]
         struct KLF2(NotKnownLayout<u8>, [u8]);
 
-        assert_eq!(<KLF2 as KnownLayout>::LAYOUT, unsized_layout(1, 1, 1));
+        assert_eq!(<KLF2 as KnownLayout>::LAYOUT, unsized_layout(1, 1, 1, false));
 
         #[derive(KnownLayout)]
         #[repr(C)]
         struct KLF3(NotKnownLayout<u8>, NotKnownLayout<AU16>, [u8]);
 
-        assert_eq!(<KLF3 as KnownLayout>::LAYOUT, unsized_layout(2, 1, 4));
+        assert_eq!(<KLF3 as KnownLayout>::LAYOUT, unsized_layout(2, 1, 4, false));
 
         #[derive(KnownLayout)]
         #[repr(C)]
         struct KLF4(NotKnownLayout<u8>, NotKnownLayout<AU16>, NotKnownLayout<AU32>, [u8]);
 
-        assert_eq!(<KLF4 as KnownLayout>::LAYOUT, unsized_layout(4, 1, 8));
+        assert_eq!(<KLF4 as KnownLayout>::LAYOUT, unsized_layout(4, 1, 8, false));
     }
 
     #[test]
@@ -6565,7 +6607,7 @@ mod tests {
     mod alloc {
         use super::*;
 
-        #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+        #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
         #[test]
         fn test_extend_vec_zeroed() {
             // Test extending when there is an existing allocation.
@@ -6583,7 +6625,7 @@ mod tests {
             drop(v);
         }
 
-        #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+        #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
         #[test]
         fn test_extend_vec_zeroed_zst() {
             // Test extending when there is an existing (fake) allocation.
@@ -6600,7 +6642,7 @@ mod tests {
             drop(v);
         }
 
-        #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+        #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
         #[test]
         fn test_insert_vec_zeroed() {
             // Insert at start (no existing allocation).
@@ -6632,7 +6674,7 @@ mod tests {
             drop(v);
         }
 
-        #[cfg(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)]
+        #[cfg(not(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0))]
         #[test]
         fn test_insert_vec_zeroed_zst() {
             // Insert at start (no existing fake allocation).

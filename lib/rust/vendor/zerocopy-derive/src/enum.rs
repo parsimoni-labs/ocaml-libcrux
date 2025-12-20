@@ -43,7 +43,8 @@ pub(crate) fn generate_tag_enum(repr: &EnumRepr, data: &DataEnum) -> TokenStream
 }
 
 fn tag_ident(variant_ident: &Ident) -> Ident {
-    Ident::new(&format!("___ZEROCOPY_TAG_{}", variant_ident), variant_ident.span())
+    let variant_ident_str = crate::ext::to_ident_str(variant_ident);
+    Ident::new(&format!("___ZEROCOPY_TAG_{}", variant_ident_str), variant_ident.span())
 }
 
 /// Generates a constant for the tag associated with each variant of the enum.
@@ -70,8 +71,14 @@ fn generate_tag_consts(data: &DataEnum) -> TokenStream {
             // Because these are the same size, this is defined to be a no-op
             // and therefore is a lossless conversion [2].
             //
-            // [1]: https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#enum-cast
-            // [2]: https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#numeric-cast
+            // [1] Per https://doc.rust-lang.org/1.81.0/reference/expressions/operator-expr.html#enum-cast:
+            //
+            //   Casts an enum to its discriminant.
+            //
+            // [2] Per https://doc.rust-lang.org/1.81.0/reference/expressions/operator-expr.html#numeric-cast:
+            //
+            //   Casting between two integers of the same size (e.g. i32 -> u32)
+            //   is a no-op.
             #[allow(non_upper_case_globals)]
             const #tag_ident: ___ZerocopyTagPrimitive =
                 ___ZerocopyTag::#variant_ident as ___ZerocopyTagPrimitive;
@@ -84,7 +91,8 @@ fn generate_tag_consts(data: &DataEnum) -> TokenStream {
 }
 
 fn variant_struct_ident(variant_ident: &Ident) -> Ident {
-    Ident::new(&format!("___ZerocopyVariantStruct_{}", variant_ident), variant_ident.span())
+    let variant_ident_str = crate::ext::to_ident_str(variant_ident);
+    Ident::new(&format!("___ZerocopyVariantStruct_{}", variant_ident_str), variant_ident.span())
 }
 
 /// Generates variant structs for the given enum variant.
@@ -160,9 +168,10 @@ fn generate_variants_union(generics: &Generics, data: &DataEnum) -> TokenStream 
             return None;
         }
 
-        // Field names are prefixed with `__field_` to prevent name collision with
-        // the `__nonempty` field.
-        let field_name = Ident::new(&format!("__field_{}", &variant.ident), variant.ident.span());
+        // Field names are prefixed with `__field_` to prevent name collision
+        // with the `__nonempty` field.
+        let field_name_str = crate::ext::to_ident_str(&variant.ident);
+        let field_name = Ident::new(&format!("__field_{}", field_name_str), variant.ident.span());
         let variant_struct_ident = variant_struct_ident(&variant.ident);
 
         Some(quote! {
@@ -263,8 +272,8 @@ pub(crate) fn derive_is_bit_valid(
                     //   original type.
                     let variant = unsafe {
                         variants.cast_unsized_unchecked(
-                            |p: core_reexport::ptr::NonNull<___ZerocopyVariants #ty_generics>| {
-                                p.cast::<#variant_struct_ident #ty_generics>()
+                            |p: #zerocopy_crate::pointer::PtrInner<'_, ___ZerocopyVariants #ty_generics>| {
+                                p.cast_sized::<#variant_struct_ident #ty_generics>()
                             }
                         )
                     };
@@ -324,15 +333,15 @@ pub(crate) fn derive_is_bit_valid(
                 // - There are no `UnsafeCell`s in the tag because it is a
                 //   primitive integer.
                 let tag_ptr = unsafe {
-                    candidate.reborrow().cast_unsized_unchecked(|p: core_reexport::ptr::NonNull<Self>| {
-                        p.cast::<___ZerocopyTagPrimitive>()
+                    candidate.reborrow().cast_unsized_unchecked(|p: #zerocopy_crate::pointer::PtrInner<'_, Self>| {
+                        p.cast_sized::<___ZerocopyTagPrimitive>()
                     })
                 };
                 // SAFETY: `tag_ptr` is casted from `candidate`, whose referent
                 // is `Initialized`. Since we have not written uninitialized
                 // bytes into the referent, `tag_ptr` is also `Initialized`.
                 let tag_ptr = unsafe { tag_ptr.assume_initialized() };
-                tag_ptr.recall_validity().read_unaligned::<#zerocopy_crate::BecauseImmutable>()
+                tag_ptr.recall_validity::<_, (_, (_, _))>().read_unaligned::<#zerocopy_crate::BecauseImmutable>()
             };
 
             // SAFETY:
@@ -346,8 +355,8 @@ pub(crate) fn derive_is_bit_valid(
             //   original enum, and so preserves the locations of any
             //   `UnsafeCell`s.
             let raw_enum = unsafe {
-                candidate.cast_unsized_unchecked(|p: core_reexport::ptr::NonNull<Self>| {
-                    p.cast::<___ZerocopyRawEnum #ty_generics>()
+                candidate.cast_unsized_unchecked(|p: #zerocopy_crate::pointer::PtrInner<'_, Self>| {
+                    p.cast_sized::<___ZerocopyRawEnum #ty_generics>()
                 })
             };
             // SAFETY: `cast_unsized_unchecked` removes the initialization
@@ -364,13 +373,15 @@ pub(crate) fn derive_is_bit_valid(
             //   subfield pointer just points to a smaller portion of the
             //   overall struct.
             let variants = unsafe {
-                raw_enum.cast_unsized_unchecked(|p: core_reexport::ptr::NonNull<___ZerocopyRawEnum #ty_generics>| {
-                    let p = p.as_ptr();
+                use #zerocopy_crate::pointer::PtrInner;
+                raw_enum.cast_unsized_unchecked(|p: PtrInner<'_, ___ZerocopyRawEnum #ty_generics>| {
+                    let p = p.as_non_null().as_ptr();
                     let ptr = core_reexport::ptr::addr_of_mut!((*p).variants);
                     // SAFETY: `ptr` is a projection into `p`, which is
                     // `NonNull`, and guaranteed not to wrap around the address
                     // space. Thus, `ptr` cannot be null.
-                    unsafe { core_reexport::ptr::NonNull::new_unchecked(ptr) }
+                    let ptr = unsafe { core_reexport::ptr::NonNull::new_unchecked(ptr) };
+                    unsafe { PtrInner::new(ptr) }
                 })
             };
 

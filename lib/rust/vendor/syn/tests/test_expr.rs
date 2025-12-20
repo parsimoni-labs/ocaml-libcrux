@@ -13,8 +13,11 @@
 
 #[macro_use]
 mod macros;
+#[macro_use]
+mod snapshot;
 
 mod common;
+mod debug;
 
 use crate::common::visit::{AsIfPrinted, FlattenParens};
 use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream};
@@ -422,6 +425,53 @@ fn test_range_precedence() {
     // range.
     syn::parse_str::<Expr>(".. x ..").unwrap_err();
     syn::parse_str::<Expr>("x .. x ..").unwrap_err();
+}
+
+#[test]
+fn test_range_attrs() {
+    // Attributes are not allowed on range expressions starting with `..`
+    syn::parse_str::<Expr>("#[allow()] ..").unwrap_err();
+    syn::parse_str::<Expr>("#[allow()] .. hi").unwrap_err();
+
+    snapshot!("#[allow()] lo .. hi" as Expr, @r#"
+    Expr::Range {
+        start: Some(Expr::Path {
+            attrs: [
+                Attribute {
+                    style: AttrStyle::Outer,
+                    meta: Meta::List {
+                        path: Path {
+                            segments: [
+                                PathSegment {
+                                    ident: "allow",
+                                },
+                            ],
+                        },
+                        delimiter: MacroDelimiter::Paren,
+                        tokens: TokenStream(``),
+                    },
+                },
+            ],
+            path: Path {
+                segments: [
+                    PathSegment {
+                        ident: "lo",
+                    },
+                ],
+            },
+        }),
+        limits: RangeLimits::HalfOpen,
+        end: Some(Expr::Path {
+            path: Path {
+                segments: [
+                    PathSegment {
+                        ident: "hi",
+                    },
+                ],
+            },
+        }),
+    }
+    "#);
 }
 
 #[test]
@@ -853,9 +903,9 @@ fn test_fixup() {
             original == reconstructed,
             "original: {}\n{:#?}\nreconstructed: {}\n{:#?}",
             original.to_token_stream(),
-            crate::macros::debug::Lite(&original),
+            crate::debug::Lite(&original),
             reconstructed.to_token_stream(),
-            crate::macros::debug::Lite(&reconstructed),
+            crate::debug::Lite(&reconstructed),
         );
     }
 }
@@ -1616,7 +1666,7 @@ fn test_permutations() -> ExitCode {
             fail!(
                 "failed to parse: {}\n{:#?}",
                 tokens,
-                crate::macros::debug::Lite(&original),
+                crate::debug::Lite(&original),
             );
         };
         AsIfPrinted.visit_expr_mut(&mut original);
@@ -1625,9 +1675,9 @@ fn test_permutations() -> ExitCode {
             fail!(
                 "before: {}\n{:#?}\nafter: {}\n{:#?}",
                 tokens,
-                crate::macros::debug::Lite(&original),
+                crate::debug::Lite(&original),
                 parsed.to_token_stream(),
-                crate::macros::debug::Lite(&parsed),
+                crate::debug::Lite(&parsed),
             );
         }
         let mut tokens_no_paren = tokens.clone();

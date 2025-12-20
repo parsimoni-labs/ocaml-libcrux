@@ -1189,7 +1189,7 @@ pub(crate) mod parsing {
         FieldValue, Index, Member,
     };
     #[cfg(feature = "full")]
-    use crate::generics::BoundLifetimes;
+    use crate::generics::{self, BoundLifetimes};
     use crate::ident::Ident;
     #[cfg(feature = "full")]
     use crate::lifetime::Lifetime;
@@ -1213,7 +1213,7 @@ pub(crate) mod parsing {
     use crate::ty::{ReturnType, Type};
     use crate::verbatim;
     #[cfg(feature = "full")]
-    use proc_macro2::TokenStream;
+    use proc_macro2::{Span, TokenStream};
     use std::mem;
 
     // When we're parsing expressions which occur before blocks, like in an if
@@ -1251,7 +1251,7 @@ pub(crate) mod parsing {
         } else if input.peek(Token![while]) {
             Expr::While(input.parse()?)
         } else if input.peek(Token![for])
-            && !(input.peek2(Token![<]) && (input.peek3(Lifetime) || input.peek3(Token![>])))
+            && !generics::parsing::choose_generics_over_qpath_after_keyword(input)
         {
             Expr::ForLoop(input.parse()?)
         } else if input.peek(Token![loop]) {
@@ -1599,7 +1599,18 @@ pub(crate) mod parsing {
 
         if let Expr::Verbatim(tokens) = &mut e {
             *tokens = verbatim::between(&begin, input);
-        } else {
+        } else if !attrs.is_empty() {
+            if let Expr::Range(range) = e {
+                let spans: &[Span] = match &range.limits {
+                    RangeLimits::HalfOpen(limits) => &limits.spans,
+                    RangeLimits::Closed(limits) => &limits.spans,
+                };
+                return Err(crate::error::new2(
+                    spans[0],
+                    *spans.last().unwrap(),
+                    "attributes are not allowed on range expressions starting with `..`",
+                ));
+            }
             let inner_attrs = e.replace_attrs(Vec::new());
             attrs.extend(inner_attrs);
             e.replace_attrs(attrs);
@@ -1792,8 +1803,7 @@ pub(crate) mod parsing {
         } else if input.peek(Token![|])
             || input.peek(Token![move])
             || input.peek(Token![for])
-                && input.peek2(Token![<])
-                && (input.peek3(Lifetime) || input.peek3(Token![>]))
+                && generics::parsing::choose_generics_over_qpath_after_keyword(input)
             || input.peek(Token![const]) && !input.peek2(token::Brace)
             || input.peek(Token![static])
             || input.peek(Token![async]) && (input.peek2(Token![|]) || input.peek2(Token![move]))
@@ -3135,7 +3145,7 @@ pub(crate) mod printing {
     #[cfg(feature = "full")]
     use crate::ty::ReturnType;
     use proc_macro2::{Literal, Span, TokenStream};
-    use quote::{ToTokens, TokenStreamExt};
+    use quote::{ToTokens, TokenStreamExt as _};
 
     #[cfg(feature = "full")]
     pub(crate) fn outer_attrs_to_tokens(attrs: &[Attribute], tokens: &mut TokenStream) {
@@ -3833,18 +3843,37 @@ pub(crate) mod printing {
     }
 
     #[cfg(feature = "full")]
-    fn print_expr_range(e: &ExprRange, tokens: &mut TokenStream, fixup: FixupContext) {
+    fn print_expr_range(e: &ExprRange, tokens: &mut TokenStream, mut fixup: FixupContext) {
         outer_attrs_to_tokens(&e.attrs, tokens);
-        if let Some(start) = &e.start {
-            let (left_prec, left_fixup) =
-                fixup.leftmost_subexpression_with_operator(start, true, false, Precedence::Range);
-            print_subexpression(start, left_prec <= Precedence::Range, tokens, left_fixup);
+
+        let needs_group = !e.attrs.is_empty();
+        if needs_group {
+            fixup = FixupContext::NONE;
         }
-        e.limits.to_tokens(tokens);
-        if let Some(end) = &e.end {
-            let right_fixup = fixup.rightmost_subexpression_fixup(false, true, Precedence::Range);
-            let right_prec = right_fixup.rightmost_subexpression_precedence(end);
-            print_subexpression(end, right_prec <= Precedence::Range, tokens, right_fixup);
+
+        let do_print_expr = |tokens: &mut TokenStream| {
+            if let Some(start) = &e.start {
+                let (left_prec, left_fixup) = fixup.leftmost_subexpression_with_operator(
+                    start,
+                    true,
+                    false,
+                    Precedence::Range,
+                );
+                print_subexpression(start, left_prec <= Precedence::Range, tokens, left_fixup);
+            }
+            e.limits.to_tokens(tokens);
+            if let Some(end) = &e.end {
+                let right_fixup =
+                    fixup.rightmost_subexpression_fixup(false, true, Precedence::Range);
+                let right_prec = right_fixup.rightmost_subexpression_precedence(end);
+                print_subexpression(end, right_prec <= Precedence::Range, tokens, right_fixup);
+            }
+        };
+
+        if needs_group {
+            token::Paren::default().surround(tokens, do_print_expr);
+        } else {
+            do_print_expr(tokens);
         }
     }
 

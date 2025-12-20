@@ -15,9 +15,6 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-#[cfg(doc)]
-use crate::Ref;
-
 // For each trait polyfill, as soon as the corresponding feature is stable, the
 // polyfill import will be unused because method/function resolution will prefer
 // the inherent method/function over a trait method/function. Thus, we suppress
@@ -26,6 +23,8 @@ use crate::Ref;
 // See the documentation on `util::polyfills` for more information.
 #[allow(unused_imports)]
 use crate::util::polyfills::{self, NonNullExt as _, NumExt as _};
+#[cfg(doc)]
+use crate::Ref;
 
 /// A mutable or immutable reference to a byte slice.
 ///
@@ -112,7 +111,7 @@ pub unsafe trait SplitByteSlice: ByteSlice {
         if mid <= self.deref().len() {
             // SAFETY: Above, we ensure that `mid <= self.deref().len()`. By
             // invariant on `ByteSlice`, a supertrait of `SplitByteSlice`,
-            // `.deref()` is guranteed to be "stable"; i.e., it will always
+            // `.deref()` is guaranteed to be "stable"; i.e., it will always
             // dereference to a byte slice of the same address and length. Thus,
             // we can be sure that the above precondition remains satisfied
             // through the call to `split_at_unchecked`.
@@ -213,7 +212,10 @@ unsafe impl SplitByteSlice for &[u8] {
     unsafe fn split_at_unchecked(self, mid: usize) -> (Self, Self) {
         // SAFETY: By contract on caller, `mid` is not greater than
         // `bytes.len()`.
-        unsafe { (<[u8]>::get_unchecked(self, ..mid), <[u8]>::get_unchecked(self, mid..)) }
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
+        unsafe {
+            (<[u8]>::get_unchecked(self, ..mid), <[u8]>::get_unchecked(self, mid..))
+        }
     }
 }
 
@@ -286,7 +288,10 @@ unsafe impl SplitByteSlice for &mut [u8] {
         //   `isize::MAX`, by invariant on `self`.
         //
         // [1] https://doc.rust-lang.org/std/slice/fn.from_raw_parts_mut.html#safety
-        unsafe { (from_raw_parts_mut(l_ptr, l_len), from_raw_parts_mut(r_ptr, r_len)) }
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
+        unsafe {
+            (from_raw_parts_mut(l_ptr, l_len), from_raw_parts_mut(r_ptr, r_len))
+        }
     }
 }
 

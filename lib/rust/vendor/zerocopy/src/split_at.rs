@@ -51,7 +51,7 @@ use crate::pointer::invariant::{Aligned, Exclusive, Invariants, Shared, Valid};
     doc = concat!("[derive]: https://docs.rs/zerocopy/", env!("CARGO_PKG_VERSION"), "/zerocopy/derive.SplitAt.html"),
 )]
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(note = "Consider adding `#[derive(SplitAt)]` to `{Self}`")
 )]
 // # Safety
@@ -765,7 +765,7 @@ where
         if l_len.padding_needed_for() == 0 {
             // SAFETY: By `T: SplitAt`, `T` is either `[T]`, or a `repr(C)` or
             // `repr(transparent)` slice DST, for which the trailing padding
-            // needed to accomodate `l_len` trailing elements is
+            // needed to accommodate `l_len` trailing elements is
             // `l_len.padding_needed_for()`. If no trailing padding is required,
             // the left and right parts are strictly non-overlapping.
             Ok(unsafe { self.via_unchecked() })

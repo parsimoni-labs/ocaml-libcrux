@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "libcrux-sha3"
-version = "0.0.3-alpha.3"
+version = "0.0.4"
 authors = ["Cryspen"]
 build = "build.rs"
 exclude = [
@@ -21,6 +21,7 @@ exclude = [
     "/c.yaml",
     "/tests/tv",
     "tests/cavp.rs",
+    "hax.py",
 ]
 autolib = false
 autobins = false
@@ -34,43 +35,67 @@ license = "Apache-2.0"
 repository = "https://github.com/cryspen/libcrux"
 
 [features]
-simd128 = []
-simd256 = []
+simd128 = ["libcrux-intrinsics/simd128"]
+simd256 = ["libcrux-intrinsics/simd256"]
 
 [lib]
 name = "libcrux_sha3"
 path = "src/lib.rs"
 bench = false
 
-[[test]]
+[[example]]
 name = "sha3"
-path = "tests/sha3.rs"
+path = "examples/sha3.rs"
+
+[[test]]
+name = "avx2"
+path = "tests/avx2.rs"
+
+[[test]]
+name = "neon"
+path = "tests/neon.rs"
+
+[[test]]
+name = "portable"
+path = "tests/portable.rs"
+
+[[test]]
+name = "test_vectors"
+path = "tests/test_vectors.rs"
 
 [[bench]]
 name = "sha3"
 path = "benches/sha3.rs"
 harness = false
 
+[dependencies.hax-lib]
+version = "=0.3.5"
+
 [dependencies.libcrux-intrinsics]
-version = "0.0.3-alpha.3"
-path = "../libcrux-intrinsics"
+version = "0.0.4"
+path = "../../utils/intrinsics"
 
 [dependencies.libcrux-platform]
 version = "0.0.2"
-path = "../sys/platform"
+path = "../../sys/platform"
+
+[dependencies.libcrux-traits]
+version = "=0.0.4"
+path = "../../../traits/"
 
 [dev-dependencies]
-criterion = "0.6.0"
+criterion = "0.8.0"
 hex = "0.4.3"
 pretty_env_logger = "0.5.0"
 rand = "0.9"
 
 [dev-dependencies.cavp]
 version = "0.0.2"
-path = "../cavp"
+path = "../../../cavp"
 
-[target."cfg(hax)".dependencies.hax-lib]
-version = "0.3.1"
+[dev-dependencies.clap]
+version = "4.5.39"
+features = ["derive"]
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

@@ -22,7 +22,7 @@ autotests = false
 autobenches = false
 description = "Platform detection crate for libcrux."
 homepage = "https://github.com/cryspen/libcrux"
-readme = "../../Readme.md"
+readme = "../../../Readme.md"
 license = "Apache-2.0"
 repository = "https://github.com/cryspen/libcrux"
 
